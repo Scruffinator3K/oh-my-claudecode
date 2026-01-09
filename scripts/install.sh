@@ -1201,8 +1201,9 @@ if command -v jq &> /dev/null; then
   ' > "$SETTINGS_FILE"
   echo -e "${GREEN}✓ Hooks configured in settings.json${NC}"
 else
-  # Fallback: create basic settings if jq not available
+  # Fallback without jq: try to merge or create
   if [ ! -f "$SETTINGS_FILE" ]; then
+    # No settings file - create new one
     cat > "$SETTINGS_FILE" << 'SETTINGS_EOF'
 {
   "hooks": {
@@ -1231,8 +1232,33 @@ else
 SETTINGS_EOF
     echo -e "${GREEN}✓ Created settings.json with hooks${NC}"
   else
-    echo -e "${YELLOW}⚠ settings.json exists, hooks may need manual configuration${NC}"
-    echo -e "${YELLOW}  Run /hooks in Claude Code to configure${NC}"
+    # Settings exists - check if hooks already configured
+    if grep -q '"hooks"' "$SETTINGS_FILE"; then
+      echo -e "${YELLOW}⚠ Hooks section exists in settings.json${NC}"
+      echo -e "${YELLOW}  Checking if our hooks are configured...${NC}"
+      if grep -q 'keyword-detector.sh' "$SETTINGS_FILE"; then
+        echo -e "${GREEN}✓ Hooks already configured${NC}"
+      else
+        echo -e "${YELLOW}  Please add hooks manually or install jq for auto-config${NC}"
+        echo -e "${YELLOW}  Run: brew install jq (macOS) or apt install jq (Linux)${NC}"
+      fi
+    else
+      # No hooks section - try to add it before the last closing brace
+      # Create temp file with hooks added
+      HOOKS_JSON='"hooks": {
+    "UserPromptSubmit": [{"hooks": [{"type": "command", "command": "bash $HOME/.claude/hooks/keyword-detector.sh"}]}],
+    "Stop": [{"hooks": [{"type": "command", "command": "bash $HOME/.claude/hooks/stop-continuation.sh"}]}]
+  }'
+      # Use sed to insert before the last }
+      sed -i.bak 's/}$/,\n  '"$(echo "$HOOKS_JSON" | tr '\n' ' ')"'\n}/' "$SETTINGS_FILE" 2>/dev/null
+      if [ $? -eq 0 ]; then
+        rm -f "$SETTINGS_FILE.bak"
+        echo -e "${GREEN}✓ Hooks added to settings.json${NC}"
+      else
+        echo -e "${YELLOW}⚠ Could not auto-configure hooks${NC}"
+        echo -e "${YELLOW}  Please install jq: brew install jq (macOS) or apt install jq (Linux)${NC}"
+      fi
+    fi
   fi
 fi
 
@@ -1333,7 +1359,7 @@ else
 fi
 
 # Save version metadata for auto-update system
-VERSION="1.4.0"
+VERSION="1.4.1"
 VERSION_FILE="$CLAUDE_CONFIG_DIR/.sisyphus-version.json"
 
 cat > "$VERSION_FILE" << VERSION_EOF
