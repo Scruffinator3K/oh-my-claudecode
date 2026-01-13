@@ -1,6 +1,5 @@
 import { describe, it, expect } from 'vitest';
 import { createBuiltinSkills, getBuiltinSkill, listBuiltinSkillNames } from '../features/builtin-skills/skills.js';
-import type { BuiltinSkill } from '../features/builtin-skills/types.js';
 
 describe('Builtin Skills', () => {
   describe('createBuiltinSkills()', () => {

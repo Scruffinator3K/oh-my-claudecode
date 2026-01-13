@@ -31,9 +31,6 @@ import {
 import type {
   RoutingContext,
   ComplexitySignals,
-  LexicalSignals,
-  StructuralSignals,
-  ContextSignals,
 } from '../features/model-routing/types.js';
 
 // ============ Signal Extraction Tests ============
@@ -995,7 +992,7 @@ describe('Integration Scenarios', () => {
       taskPrompt: 'Simple task that keeps failing',
       previousFailures: 3,
     };
-    const decision = routeTask(context);
+    const _decision = routeTask(context);
 
     // Previous failures should increase complexity score
     const signals = extractContextSignals(context);

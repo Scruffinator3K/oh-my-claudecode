@@ -56,7 +56,7 @@ describe('Installer Constants', () => {
     });
 
     it('should have valid frontmatter for each agent', () => {
-      for (const [filename, content] of Object.entries(AGENT_DEFINITIONS)) {
+      for (const [_filename, content] of Object.entries(AGENT_DEFINITIONS)) {
         // Check for frontmatter delimiters
         expect(content).toMatch(/^---\n/);
         expect(content).toMatch(/\n---\n/);
@@ -149,7 +149,7 @@ describe('Installer Constants', () => {
     });
 
     it('should have valid frontmatter for each command', () => {
-      for (const [filename, content] of Object.entries(COMMAND_DEFINITIONS)) {
+      for (const [_filename, content] of Object.entries(COMMAND_DEFINITIONS)) {
         // Check for frontmatter delimiters
         expect(content).toMatch(/^---\n/);
         expect(content).toMatch(/\n---\n/);
@@ -275,7 +275,7 @@ describe('Installer Constants', () => {
 
     it('should match package.json version', () => {
       // This is a runtime check - VERSION should match the package.json
-      expect(VERSION).toBe('2.0.1-beta');
+      expect(VERSION).toBe('2.0.1');
     });
   });
 

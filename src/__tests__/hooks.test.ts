@@ -5,8 +5,7 @@ import {
   detectKeywordsWithType,
   hasKeyword,
   getPrimaryKeyword,
-  type DetectedKeyword,
-  type KeywordType
+  type DetectedKeyword
 } from '../hooks/keyword-detector/index.js';
 import {
   formatTodoStatus,
