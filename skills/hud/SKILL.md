@@ -27,23 +27,118 @@ When you run `/hud` or `/hud setup`, the system will automatically:
 3. If missing, create the HUD wrapper script and configure settings
 4. Report status and prompt to restart Claude Code if changes were made
 
-**IMPORTANT**: If the argument is `setup` OR if the HUD script doesn't exist at `~/.claude/hud/omc-hud.mjs`, you MUST run the setup by:
-1. First check if the files exist using Bash: `ls ~/.claude/hud/omc-hud.mjs 2>/dev/null && echo EXISTS || echo MISSING`
-2. If MISSING or argument is `setup`, find the plugin path and run: `node <plugin-path>/scripts/plugin-setup.mjs`
-3. The plugin path can be found at: `~/.claude/plugins/cache/omc/oh-my-claudecode/<version>/` or the local dev path
+**IMPORTANT**: If the argument is `setup` OR if the HUD script doesn't exist at `~/.claude/hud/omc-hud.mjs`, you MUST create the HUD files directly using the instructions below.
 
-To find and run setup automatically:
+### Setup Instructions (Run These Commands)
+
+**Step 1:** Check if setup is needed:
 ```bash
-# Try plugin cache first, then dev paths
-PLUGIN_SETUP=$(find ~/.claude/plugins/cache/omc/oh-my-claudecode -name "plugin-setup.mjs" 2>/dev/null | head -1)
-if [ -z "$PLUGIN_SETUP" ]; then
-  # Try common dev paths
-  for p in ~/Workspace/oh-my-claudecode ~/workspace/oh-my-claudecode ~/projects/oh-my-claudecode; do
-    if [ -f "$p/scripts/plugin-setup.mjs" ]; then PLUGIN_SETUP="$p/scripts/plugin-setup.mjs"; break; fi
-  done
-fi
-if [ -n "$PLUGIN_SETUP" ]; then node "$PLUGIN_SETUP"; else echo "Could not find plugin-setup.mjs"; fi
+ls ~/.claude/hud/omc-hud.mjs 2>/dev/null && echo "EXISTS" || echo "MISSING"
 ```
+
+**Step 2:** Check if the plugin is built (CRITICAL - common issue!):
+```bash
+# Find the latest version and check if dist/hud/index.js exists
+PLUGIN_VERSION=$(ls ~/.claude/plugins/cache/omc/oh-my-claudecode/ 2>/dev/null | sort -V | tail -1)
+if [ -n "$PLUGIN_VERSION" ]; then
+  ls ~/.claude/plugins/cache/omc/oh-my-claudecode/$PLUGIN_VERSION/dist/hud/index.js 2>/dev/null && echo "BUILT" || echo "NOT_BUILT"
+fi
+```
+
+**If NOT_BUILT**, the plugin needs to be compiled. Run:
+```bash
+cd ~/.claude/plugins/cache/omc/oh-my-claudecode/$PLUGIN_VERSION && npm install
+```
+This will install dependencies and build the TypeScript code automatically (via the `prepare` script).
+
+**Step 3:** If omc-hud.mjs is MISSING or argument is `setup`, create the HUD directory and script:
+
+First, create the directory:
+```bash
+mkdir -p ~/.claude/hud
+```
+
+Then, use the Write tool to create `~/.claude/hud/omc-hud.mjs` with this exact content:
+
+```javascript
+#!/usr/bin/env node
+/**
+ * OMC HUD - Statusline Script
+ * Wrapper that imports from plugin cache or development paths
+ */
+
+import { existsSync, readdirSync } from "node:fs";
+import { homedir } from "node:os";
+import { join } from "node:path";
+
+async function main() {
+  const home = homedir();
+
+  // 1. Try plugin cache first (marketplace: omc, plugin: oh-my-claudecode)
+  const pluginCacheBase = join(home, ".claude/plugins/cache/omc/oh-my-claudecode");
+  if (existsSync(pluginCacheBase)) {
+    try {
+      const versions = readdirSync(pluginCacheBase);
+      if (versions.length > 0) {
+        const latestVersion = versions.sort().reverse()[0];
+        const pluginPath = join(pluginCacheBase, latestVersion, "dist/hud/index.js");
+        if (existsSync(pluginPath)) {
+          await import(pluginPath);
+          return;
+        }
+      }
+    } catch { /* continue */ }
+  }
+
+  // 2. Development paths
+  const devPaths = [
+    join(home, "Workspace/oh-my-claude-sisyphus/dist/hud/index.js"),
+    join(home, "workspace/oh-my-claude-sisyphus/dist/hud/index.js"),
+    join(home, "Workspace/oh-my-claudecode/dist/hud/index.js"),
+    join(home, "workspace/oh-my-claudecode/dist/hud/index.js"),
+  ];
+
+  for (const devPath of devPaths) {
+    if (existsSync(devPath)) {
+      try {
+        await import(devPath);
+        return;
+      } catch { /* continue */ }
+    }
+  }
+
+  // 3. Fallback
+  console.log("[OMC] active");
+}
+
+main();
+```
+
+**Step 3:** Make it executable:
+```bash
+chmod +x ~/.claude/hud/omc-hud.mjs
+```
+
+**Step 4:** Update settings.json to use the HUD:
+
+Read `~/.claude/settings.json`, then update/add the `statusLine` field:
+```json
+{
+  "statusLine": {
+    "type": "command",
+    "command": "node ~/.claude/hud/omc-hud.mjs"
+  }
+}
+```
+
+Use the Edit tool to add/update this field while preserving other settings.
+
+**Step 5:** Clean up old HUD scripts (if any):
+```bash
+rm -f ~/.claude/hud/sisyphus-hud.mjs 2>/dev/null
+```
+
+**Step 6:** Tell the user to restart Claude Code for changes to take effect.
 
 ## Display Presets
 
