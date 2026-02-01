@@ -22,6 +22,7 @@ export { criticAgent } from './critic.js';
 export { analystAgent } from './analyst.js';
 export { executorAgent } from './executor.js';
 export { plannerAgent } from './planner.js';
+export { deepExecutorAgent } from './deep-executor.js';
 export { qaTesterAgent } from './qa-tester.js';
 export { scientistAgent } from './scientist.js';
 
@@ -36,6 +37,7 @@ import { criticAgent } from './critic.js';
 import { analystAgent } from './analyst.js';
 import { executorAgent } from './executor.js';
 import { plannerAgent } from './planner.js';
+import { deepExecutorAgent } from './deep-executor.js';
 import { qaTesterAgent } from './qa-tester.js';
 import { scientistAgent } from './scientist.js';
 
@@ -343,6 +345,7 @@ export function getAgentDefinitions(overrides?: Partial<Record<string, Partial<A
     // Role: plan-creation
     // NotFor: requirements-gathering, code-analysis, plan-review
     planner: plannerAgent,
+    'deep-executor': deepExecutorAgent,
     'qa-tester': qaTesterAgent,
     scientist: scientistAgent,
     // Tiered variants (prompts loaded from /agents/*.md)

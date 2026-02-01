@@ -8,6 +8,7 @@ This is the single source of truth for all agent tier information. All skill fil
 |--------|-------------|-----------------|-------------|
 | **Analysis** | architect-low | architect-medium | architect |
 | **Execution** | executor-low | executor | executor-high |
+| **Deep Work** | - | - | deep-executor |
 | **Search** | explore | explore-medium | explore-high |
 | **Research** | researcher-low | researcher | - |
 | **Frontend** | designer-low | designer | designer-high |
@@ -70,6 +71,8 @@ This is the single source of truth for all agent tier information. All skill fil
 | Project-wide type checking | build-fixer | MEDIUM |
 | Check single file for errors | executor-low | LOW |
 | Data analysis / computation | scientist | MEDIUM |
+| Complex autonomous work | deep-executor | HIGH |
+| Deep goal-oriented execution | deep-executor | HIGH |
 
 ## Usage
 
@@ -121,6 +124,7 @@ For token savings, prefer lower tiers when the task allows:
 | `executor-low` | yes | - | - | - | - | - | - |
 | `executor` | yes | yes | - | - | - | - | - |
 | `executor-high` | yes | yes | - | - | yes | yes | - |
+| `deep-executor` | yes | yes | - | - | yes | yes | - |
 | `build-fixer` | yes | yes | - | - | - | - | - |
 | `build-fixer-low` | yes | yes | - | - | - | - | - |
 | `tdd-guide` | yes | - | - | - | - | - | - |

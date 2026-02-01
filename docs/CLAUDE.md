@@ -271,9 +271,9 @@ Key points:
 - **ecomode is a modifier**: It only changes model routing, not execution behavior
 - **autopilot can transition**: To ralph (persistence) or ultraqa (QA cycling)
 
-### All 32 Agents
+### All 33 Agents
 
-See [Agent Tiers Reference](./shared/agent-tiers.md) for the complete agent tier matrix with all 32 agents organized by domain and tier.
+See [Agent Tiers Reference](./shared/agent-tiers.md) for the complete agent tier matrix with all 33 agents organized by domain and tier.
 
 Always use `oh-my-claudecode:` prefix when calling via Task tool.
 
