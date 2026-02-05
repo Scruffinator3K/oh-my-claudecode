@@ -136,6 +136,17 @@ omc wait --stop   # 데몬 비활성화
 - [Claude Code](https://docs.anthropic.com/claude-code) CLI
 - Claude Max/Pro 구독 또는 Anthropic API 키
 
+### 선택사항: 멀티 AI 오케스트레이션
+
+OMC는 교차 검증과 디자인 일관성을 위해 외부 AI 제공자를 선택적으로 활용할 수 있습니다. **필수가 아닙니다** — OMC는 이것들 없이도 완벽하게 작동합니다.
+
+| 제공자 | 설치 | 활용 |
+|--------|------|------|
+| [Gemini CLI](https://github.com/google-gemini/gemini-cli) | `npm install -g @google/gemini-cli` | 디자인 리뷰, UI 일관성 (1M 토큰 컨텍스트) |
+| [Codex CLI](https://github.com/openai/codex) | `npm install -g @openai/codex` | 아키텍처 검증, 코드 리뷰 교차 확인 |
+
+**비용:** 3개 Pro 플랜 (Claude + Gemini + ChatGPT)으로 월 ~$60에 모든 것을 커버합니다.
+
 ---
 
 ## 라이선스

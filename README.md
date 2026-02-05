@@ -136,6 +136,17 @@ omc wait --stop   # Disable daemon
 - [Claude Code](https://docs.anthropic.com/claude-code) CLI
 - Claude Max/Pro subscription OR Anthropic API key
 
+### Optional: Multi-AI Orchestration
+
+OMC can optionally orchestrate external AI providers for cross-validation and design consistency. These are **not required** — OMC works fully without them.
+
+| Provider | Install | What it enables |
+|----------|---------|-----------------|
+| [Gemini CLI](https://github.com/google-gemini/gemini-cli) | `npm install -g @google/gemini-cli` | Design review, UI consistency (1M token context) |
+| [Codex CLI](https://github.com/openai/codex) | `npm install -g @openai/codex` | Architecture validation, code review cross-check |
+
+**Cost:** 3 Pro plans (Claude + Gemini + ChatGPT) cover everything for ~$60/month.
+
 ---
 
 ## License

@@ -136,6 +136,17 @@ omc wait --stop   # 禁用守护进程
 - [Claude Code](https://docs.anthropic.com/claude-code) CLI
 - Claude Max/Pro 订阅 或 Anthropic API 密钥
 
+### 可选：多 AI 编排
+
+OMC 可以选择性地调用外部 AI 提供商进行交叉验证和设计一致性检查。**非必需** — 没有它们 OMC 也能完整运行。
+
+| 提供商 | 安装 | 功能 |
+|--------|------|------|
+| [Gemini CLI](https://github.com/google-gemini/gemini-cli) | `npm install -g @google/gemini-cli` | 设计审查、UI 一致性（1M token 上下文）|
+| [Codex CLI](https://github.com/openai/codex) | `npm install -g @openai/codex` | 架构验证、代码审查交叉检查 |
+
+**费用：** 3 个 Pro 计划（Claude + Gemini + ChatGPT）每月约 $60 即可覆盖所有功能。
+
 ---
 
 ## 开源协议
