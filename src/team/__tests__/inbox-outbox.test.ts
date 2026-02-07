@@ -5,8 +5,12 @@ import { homedir } from 'os';
 import {
   appendOutbox, rotateOutboxIfNeeded, readNewInboxMessages,
   readAllInboxMessages, clearInbox, writeShutdownSignal,
-  checkShutdownSignal, deleteShutdownSignal, cleanupWorkerFiles
+  checkShutdownSignal, deleteShutdownSignal, writeDrainSignal,
+  checkDrainSignal, deleteDrainSignal, cleanupWorkerFiles,
+  rotateInboxIfNeeded
 } from '../inbox-outbox.js';
+import { sanitizeName } from '../tmux-session.js';
+import { validateResolvedPath } from '../fs-utils.js';
 import type { OutboxMessage, InboxMessage } from '../types.js';
 
 const TEST_TEAM = 'test-team-io';
@@ -140,10 +144,38 @@ describe('shutdown signals', () => {
   });
 });
 
+describe('drain signals', () => {
+  it('writes and reads drain signal', () => {
+    writeDrainSignal(TEST_TEAM, 'w1', 'req-1', 'scaling down');
+    const signal = checkDrainSignal(TEST_TEAM, 'w1');
+    expect(signal).not.toBeNull();
+    expect(signal!.requestId).toBe('req-1');
+    expect(signal!.reason).toBe('scaling down');
+    expect(signal!.timestamp).toBeTruthy();
+  });
+
+  it('returns null when no drain signal exists', () => {
+    const signal = checkDrainSignal(TEST_TEAM, 'no-such-worker');
+    expect(signal).toBeNull();
+  });
+
+  it('deletes drain signal', () => {
+    writeDrainSignal(TEST_TEAM, 'w1', 'req-1', 'test');
+    expect(checkDrainSignal(TEST_TEAM, 'w1')).not.toBeNull();
+    deleteDrainSignal(TEST_TEAM, 'w1');
+    expect(checkDrainSignal(TEST_TEAM, 'w1')).toBeNull();
+  });
+
+  it('delete does not throw for non-existent signal', () => {
+    expect(() => deleteDrainSignal(TEST_TEAM, 'nonexistent')).not.toThrow();
+  });
+});
+
 describe('cleanupWorkerFiles', () => {
   it('removes inbox, outbox, cursor, signal files', () => {
     appendOutbox(TEST_TEAM, 'w1', { type: 'idle', timestamp: '2026-01-01T00:00:00Z' });
     writeShutdownSignal(TEST_TEAM, 'w1', 'req', 'test');
+    writeDrainSignal(TEST_TEAM, 'w1', 'req', 'test');
     writeFileSync(join(TEAMS_DIR, 'inbox', 'w1.jsonl'), '{}');
     writeFileSync(join(TEAMS_DIR, 'inbox', 'w1.offset'), '{}');
 
@@ -152,5 +184,79 @@ describe('cleanupWorkerFiles', () => {
     expect(existsSync(join(TEAMS_DIR, 'inbox', 'w1.jsonl'))).toBe(false);
     expect(existsSync(join(TEAMS_DIR, 'inbox', 'w1.offset'))).toBe(false);
     expect(existsSync(join(TEAMS_DIR, 'signals', 'w1.shutdown'))).toBe(false);
+    expect(existsSync(join(TEAMS_DIR, 'signals', 'w1.drain'))).toBe(false);
+  });
+});
+
+describe('MAX_INBOX_READ_SIZE buffer cap', () => {
+  it('caps buffer allocation on large inbox reads', () => {
+    const inbox = join(TEAMS_DIR, 'inbox', 'w1.jsonl');
+    // Write many messages to create a large file
+    const msgs: string[] = [];
+    for (let i = 0; i < 1000; i++) {
+      const msg: InboxMessage = { type: 'message', content: `msg-${i}-${'x'.repeat(100)}`, timestamp: '2026-01-01T00:00:00Z' };
+      msgs.push(JSON.stringify(msg));
+    }
+    writeFileSync(inbox, msgs.join('\n') + '\n');
+    // Should not throw OOM — reads are capped
+    const result = readNewInboxMessages(TEST_TEAM, 'w1');
+    expect(result.length).toBeGreaterThan(0);
+  });
+});
+
+describe('rotateInboxIfNeeded', () => {
+  it('rotates when inbox exceeds maxSizeBytes', () => {
+    const inbox = join(TEAMS_DIR, 'inbox', 'w1.jsonl');
+    // Write enough data to exceed a small threshold
+    const msgs: string[] = [];
+    for (let i = 0; i < 50; i++) {
+      const msg: InboxMessage = { type: 'message', content: `msg-${i}`, timestamp: '2026-01-01T00:00:00Z' };
+      msgs.push(JSON.stringify(msg));
+    }
+    writeFileSync(inbox, msgs.join('\n') + '\n');
+
+    const { statSync } = require('fs');
+    const sizeBefore = statSync(inbox).size;
+
+    // Rotate with a threshold smaller than current size
+    rotateInboxIfNeeded(TEST_TEAM, 'w1', 100);
+
+    const sizeAfter = statSync(inbox).size;
+    expect(sizeAfter).toBeLessThan(sizeBefore);
+  });
+
+  it('no-op when inbox is under maxSizeBytes', () => {
+    const inbox = join(TEAMS_DIR, 'inbox', 'w1.jsonl');
+    const msg: InboxMessage = { type: 'message', content: 'small', timestamp: '2026-01-01T00:00:00Z' };
+    writeFileSync(inbox, JSON.stringify(msg) + '\n');
+
+    const { statSync } = require('fs');
+    const sizeBefore = statSync(inbox).size;
+
+    rotateInboxIfNeeded(TEST_TEAM, 'w1', 10000);
+
+    const sizeAfter = statSync(inbox).size;
+    expect(sizeAfter).toBe(sizeBefore);
+  });
+});
+
+describe('path traversal guard on teamsDir', () => {
+  it('sanitizeName prevents traversal characters in team names', () => {
+    // '../../../etc' gets sanitized to 'etc' — dots and slashes are stripped
+    // This means the path traversal is blocked at the sanitization layer
+    expect(sanitizeName('../../../etc')).toBe('etc');
+    // No dots, no slashes survive sanitization
+    expect(sanitizeName('foo/../bar')).toBe('foobar');
+  });
+
+  it('validateResolvedPath catches paths that escape base', () => {
+    expect(() => validateResolvedPath('/home/user/../escape', '/home/user'))
+      .toThrow('Path traversal');
+  });
+
+  it('all-special-char team name throws from sanitizeName', () => {
+    // A name made entirely of special chars produces empty string → throws
+    expect(() => appendOutbox('...///...', 'w1', { type: 'idle', timestamp: '2026-01-01T00:00:00Z' }))
+      .toThrow();
   });
 });

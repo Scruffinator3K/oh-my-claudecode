@@ -66,6 +66,81 @@ User: "/team 5:executor fix all TypeScript errors"
 - Graceful shutdown protocol
 - Zero external dependencies (no SQLite needed)
 
+## ENFORCEMENT (CRITICAL - HARD RULES)
+
+### Mandatory Tool Sequence
+
+**EVERY TEAM MODE SESSION MUST FOLLOW THIS EXACT SEQUENCE:**
+
+1. **TeamCreate()** - MUST be called FIRST before any Task agents
+2. **TaskCreate() × N** - Create all subtasks on the shared task list
+3. **Task(team_name=..., name=...) × N** - Spawn teammates WITH both team_name and name parameters
+4. **Monitor** - Track progress via TaskList + receive automatic SendMessage from teammates
+5. **SendMessage(type="shutdown_request") × N** - Graceful shutdown each teammate
+6. **TeamDelete()** - Clean up team resources
+
+**SKIPPING ANY STEP = NOT TEAM MODE.**
+
+### ANTI-PATTERNS (NEVER DO THIS)
+
+❌ **Launching Task agents without calling TeamCreate first**
+   - If you skip TeamCreate, you're doing ultrawork, NOT team mode
+
+❌ **Using run_in_background without team_name parameter**
+   - That's parallel ultrawork, not team coordination
+
+❌ **Skipping TaskCreate and having agents self-organize**
+   - Defeats the purpose of shared task list coordination
+
+❌ **Skipping shutdown_request / TeamDelete cleanup**
+   - Leaves zombie team state and orphaned task lists
+
+❌ **Using Task tool without the `name` parameter**
+   - Teammates need names for messaging - name identifies them in SendMessage
+
+❌ **Spawning agents then claiming "team mode complete" without cleanup**
+   - You MUST call SendMessage(shutdown_request) and TeamDelete
+
+### Mode Distinction
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│ TEAM MODE = TeamCreate + TaskCreate + Task(team_name, name) │
+│           + SendMessage + TeamDelete                         │
+│                                                              │
+│ ULTRAWORK = Task(run_in_background) without team infra      │
+│                                                              │
+│ If you skip TeamCreate, you are doing ULTRAWORK, NOT TEAM.  │
+└─────────────────────────────────────────────────────────────┘
+```
+
+### Tool Call Requirements
+
+**Task tool for teammates MUST include:**
+- `team_name` - Links agent to team's shared task list
+- `name` - Identifies agent for messaging (e.g., "agent-1", "executor-2", "fixer-a")
+
+**Example:**
+```typescript
+Task(
+  subagent_type="oh-my-claudecode:executor",
+  team_name="fix-issues",
+  name="agent-1",
+  prompt="Fix TypeScript errors in src/commands/"
+)
+```
+
+## Verification Gate
+
+**Before claiming team mode is complete, verify ALL of:**
+
+1. ✅ TeamCreate was called (team config exists at `~/.claude/teams/{team-name}/config.json`)
+2. ✅ All TaskCreate tasks show `status=completed` in TaskList
+3. ✅ All teammates received `shutdown_request` via SendMessage
+4. ✅ TeamDelete was called to clean up team resources
+
+**If ANY verification fails → CONTINUE WORKING until all pass.**
+
 ## Workflow
 
 ### 1. Parse Input
@@ -85,8 +160,18 @@ From `{{ARGUMENTS}}`, extract:
 - TaskCreate for each subtask (with dependencies if needed)
 
 ### 4. Spawn Teammates
-- Launch N agents via Task tool with team_name parameter
+- Launch N agents via Task tool with BOTH `team_name` AND `name` parameters
 - Each teammate: TaskList → claim → work → complete → report
+
+**Example:**
+```typescript
+Task(
+  subagent_type="oh-my-claudecode:executor",
+  team_name="fix-issues",
+  name="agent-1",
+  prompt="Fix TypeScript errors in src/commands/"
+)
+```
 
 ### 5. Monitor & Coordinate
 - Track progress via TaskList

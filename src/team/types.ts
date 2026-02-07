@@ -17,6 +17,7 @@ export interface BridgeConfig {
   taskTimeoutMs: number;        // default: 600000 (10 min)
   maxConsecutiveErrors: number;  // default: 3 — self-quarantine threshold
   outboxMaxLines: number;       // default: 500 — rotation trigger
+  maxRetries?: number;          // default: 5 — max task retry attempts
 }
 
 /** Mirrors the JSON structure of ~/.claude/tasks/{team}/{id}.json */
@@ -30,10 +31,13 @@ export interface TaskFile {
   blocks: string[];
   blockedBy: string[];
   metadata?: Record<string, unknown>;
+  claimedBy?: string;
+  claimedAt?: number;
+  claimPid?: number;
 }
 
 /** Partial update for a task file (only fields being changed) */
-export type TaskFileUpdate = Partial<Pick<TaskFile, 'status' | 'owner'>>;
+export type TaskFileUpdate = Partial<Pick<TaskFile, 'status' | 'owner' | 'metadata' | 'claimedBy' | 'claimedAt' | 'claimPid'>>;
 
 /** JSONL message from lead -> worker (inbox) */
 export interface InboxMessage {
@@ -44,7 +48,7 @@ export interface InboxMessage {
 
 /** JSONL message from worker -> lead (outbox) */
 export interface OutboxMessage {
-  type: 'task_complete' | 'task_failed' | 'idle' | 'shutdown_ack' | 'heartbeat' | 'error';
+  type: 'task_complete' | 'task_failed' | 'idle' | 'shutdown_ack' | 'drain_ack' | 'heartbeat' | 'error';
   taskId?: string;
   summary?: string;
   message?: string;
@@ -55,6 +59,13 @@ export interface OutboxMessage {
 
 /** Shutdown signal file content */
 export interface ShutdownSignal {
+  requestId: string;
+  reason: string;
+  timestamp: string;
+}
+
+/** Drain signal: finish current task, then shut down gracefully */
+export interface DrainSignal {
   requestId: string;
   reason: string;
   timestamp: string;
@@ -110,3 +121,19 @@ export interface TaskFailureSidecar {
   retryCount: number;
   lastFailedAt: string;
 }
+
+/** Worker backend type */
+export type WorkerBackend = 'claude-native' | 'mcp-codex' | 'mcp-gemini';
+
+/** Worker capability tag */
+export type WorkerCapability =
+  | 'code-edit'
+  | 'code-review'
+  | 'security-review'
+  | 'architecture'
+  | 'testing'
+  | 'documentation'
+  | 'ui-design'
+  | 'refactoring'
+  | 'research'
+  | 'general';
