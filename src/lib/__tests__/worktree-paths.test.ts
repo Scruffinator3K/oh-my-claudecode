@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { mkdirSync, rmSync, writeFileSync, existsSync } from 'fs';
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync, existsSync } from 'fs';
 import { join } from 'path';
+import { tmpdir } from 'os';
 import {
   validatePath,
   resolveOmcPath,
@@ -21,12 +22,12 @@ import {
   validateSessionId,
 } from '../worktree-paths.js';
 
-const TEST_DIR = '/tmp/worktree-paths-test';
+let TEST_DIR: string;
 
 describe('worktree-paths', () => {
   beforeEach(() => {
     clearWorktreeCache();
-    mkdirSync(TEST_DIR, { recursive: true });
+    TEST_DIR = mkdtempSync(join(tmpdir(), 'worktree-paths-test-'));
   });
 
   afterEach(() => {

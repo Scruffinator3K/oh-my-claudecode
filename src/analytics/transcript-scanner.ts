@@ -2,6 +2,7 @@ import { readdir, stat } from 'fs/promises';
 import { existsSync } from 'fs';
 import { join, sep } from 'path';
 import { homedir } from 'os';
+import { globToSafeRegExp } from '../lib/safe-regexp.js';
 
 /**
  * Check if the encoded path looks like a Windows path (starts with drive letter)
@@ -264,13 +265,8 @@ function decodeUnixPath(dirName: string): string {
 function matchesPattern(path: string, pattern?: string): boolean {
   if (!pattern) return true;
 
-  // Convert glob pattern to regex
-  const regexPattern = pattern
-    .replace(/\./g, '\\.')
-    .replace(/\*/g, '.*')
-    .replace(/\?/g, '.');
-
-  const regex = new RegExp(`^${regexPattern}$`);
+  const regex = globToSafeRegExp(pattern);
+  if (!regex) return false;
   return regex.test(path);
 }
 

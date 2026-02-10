@@ -49,8 +49,8 @@ export function interpolatePath(pathTemplate: string, sessionId: string): string
   const date = now.toISOString().split('T')[0]; // YYYY-MM-DD
   const time = now.toISOString().split('T')[1].split('.')[0].replace(/:/g, '-'); // HH-MM-SS
 
-  // Sanitize session_id: remove path separators and traversal sequences
-  const safeSessionId = sessionId.replace(/[/\\..]/g, '_');
+  // Sanitize session_id: allowlist approach - only allow safe characters
+  const safeSessionId = sessionId.replace(/[^a-zA-Z0-9_-]/g, '_');
 
   return normalize(pathTemplate
     .replace(/~/g, homedir())

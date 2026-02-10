@@ -1,6 +1,10 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { normalize, sep } from 'path';
 import { formatSessionSummary, interpolatePath, triggerStopCallbacks } from '../callbacks.js';
 import type { SessionMetrics } from '../index.js';
+
+// Regex-safe path separator for cross-platform matching
+const S = sep.replace(/\\/g, '\\\\');
 
 // Mock auto-update module
 vi.mock('../../../features/auto-update.js', () => ({
@@ -89,36 +93,61 @@ describe('formatSessionSummary', () => {
 describe('interpolatePath', () => {
   it('replaces {session_id} placeholder', () => {
     const result = interpolatePath('/tmp/{session_id}.md', 'abc-123');
-    expect(result).toBe('/tmp/abc-123.md');
+    expect(result).toBe(normalize('/tmp/abc-123.md'));
   });
 
   it('replaces {date} placeholder', () => {
     const result = interpolatePath('/tmp/{date}.md', 'session-1');
     // Date should be YYYY-MM-DD format
-    expect(result).toMatch(/\/tmp\/\d{4}-\d{2}-\d{2}\.md/);
+    expect(result).toMatch(new RegExp(`${S}tmp${S}\\d{4}-\\d{2}-\\d{2}\\.md`));
   });
 
   it('replaces {time} placeholder', () => {
     const result = interpolatePath('/tmp/{time}.md', 'session-1');
     // Time should be HH-MM-SS format
-    expect(result).toMatch(/\/tmp\/\d{2}-\d{2}-\d{2}\.md/);
+    expect(result).toMatch(new RegExp(`${S}tmp${S}\\d{2}-\\d{2}-\\d{2}\\.md`));
   });
 
   it('replaces ~ with homedir', () => {
     const result = interpolatePath('~/logs/test.md', 'session-1');
     expect(result).not.toContain('~');
-    expect(result).toContain('/logs/test.md');
+    expect(result).toContain(`${sep}logs${sep}test.md`);
   });
 
   it('replaces multiple placeholders', () => {
     const result = interpolatePath('/tmp/{date}/{session_id}.md', 'my-session');
     expect(result).toContain('my-session');
-    expect(result).toMatch(/\/tmp\/\d{4}-\d{2}-\d{2}\/my-session\.md/);
+    expect(result).toMatch(new RegExp(`${S}tmp${S}\\d{4}-\\d{2}-\\d{2}${S}my-session\\.md`));
   });
 
   it('handles paths without placeholders', () => {
     const result = interpolatePath('/tmp/fixed-path.md', 'session-1');
-    expect(result).toBe('/tmp/fixed-path.md');
+    expect(result).toBe(normalize('/tmp/fixed-path.md'));
+  });
+
+  it('sanitizes session ID with path traversal attempts', () => {
+    const result = interpolatePath('/tmp/{session_id}.md', '../../etc/passwd');
+    expect(result).not.toContain('..');
+    expect(result).not.toContain('/etc/passwd');
+    expect(result).toContain('______etc_passwd');
+  });
+
+  it('sanitizes session ID with special characters', () => {
+    const result = interpolatePath('/tmp/{session_id}.md', 'id;rm -rf /');
+    expect(result).not.toContain(';');
+    expect(result).not.toContain(' ');
+    expect(result).toContain('id_rm_-rf__');
+  });
+
+  it('sanitizes session ID with unicode characters', () => {
+    const result = interpolatePath('/tmp/{session_id}.md', 'id\u0000null\u202Ebidi');
+    expect(result).not.toContain('\u0000');
+    expect(result).not.toContain('\u202E');
+  });
+
+  it('preserves valid session ID characters', () => {
+    const result = interpolatePath('/tmp/{session_id}.md', 'abc-123_DEF');
+    expect(result).toContain('abc-123_DEF');
   });
 });
 
@@ -173,9 +202,9 @@ describe('triggerStopCallbacks', () => {
     const metrics = createTestMetrics();
     await triggerStopCallbacks(metrics, testInput);
 
-    expect(mockMkdirSync).toHaveBeenCalledWith('/tmp', { recursive: true });
+    expect(mockMkdirSync).toHaveBeenCalledWith(normalize('/tmp'), { recursive: true });
     expect(mockWriteFileSync).toHaveBeenCalledWith(
-      '/tmp/test-test-session-123.md',
+      normalize('/tmp/test-test-session-123.md'),
       expect.stringContaining('test-session-123'),
       { encoding: 'utf-8', mode: 0o600 }
     );
@@ -197,7 +226,7 @@ describe('triggerStopCallbacks', () => {
     await triggerStopCallbacks(metrics, testInput);
 
     expect(mockWriteFileSync).toHaveBeenCalledWith(
-      '/tmp/test.json',
+      normalize('/tmp/test.json'),
       expect.stringContaining('"session_id"'),
       { encoding: 'utf-8', mode: 0o600 }
     );

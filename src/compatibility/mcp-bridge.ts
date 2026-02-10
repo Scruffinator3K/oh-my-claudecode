@@ -69,6 +69,20 @@ const BLOCKED_ENV_VARS = new Set([
   'BASH_ENV',
   'ENV',
   'ZDOTDIR',
+  // Additional runtime injection vectors
+  'JAVA_TOOL_OPTIONS',
+  '_JAVA_OPTIONS',
+  'GOFLAGS',
+  'CARGO_BUILD_RUSTFLAGS',
+  'CARGO_ENCODED_RUSTFLAGS',
+  'DENO_DIR',
+  'DENO_AUTH_TOKENS',
+  'BUN_CONFIG_DIR',
+  'DOTNET_STARTUP_HOOKS',
+  'GEM_HOME',
+  'GEM_PATH',
+  'NIX_PATH',
+  'PROMPT_COMMAND',
 ]);
 
 /**

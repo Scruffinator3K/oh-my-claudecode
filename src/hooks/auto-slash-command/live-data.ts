@@ -18,6 +18,7 @@
 import { execSync } from "child_process";
 import { existsSync, readFileSync } from "fs";
 import { join } from "path";
+import { createSafeRegExp } from "../../lib/safe-regexp.js";
 
 const TIMEOUT_MS = 10_000;
 const MAX_OUTPUT_BYTES = 50 * 1024;
@@ -108,6 +109,14 @@ export function clearCache(): void {
 
 // ─── Security ────────────────────────────────────────────────────────────────
 
+/** Default safe commands when no policy file exists (default-deny) */
+const DEFAULT_SAFE_COMMANDS = new Set([
+  'cat', 'date', 'diff', 'docker', 'echo', 'env', 'find', 'git', 'grep',
+  'head', 'jq', 'ls', 'node', 'npm', 'npx', 'pip', 'pnpm', 'printenv',
+  'python', 'python3', 'rg', 'sed', 'sort', 'tail', 'tsc', 'uname',
+  'wc', 'which', 'whoami', 'yarn',
+]);
+
 let cachedPolicy: SecurityPolicy | null = null;
 let policyLoadedFrom: string | null = null;
 
@@ -144,12 +153,9 @@ function checkSecurity(command: string): { allowed: boolean; reason?: string } {
   // Check denied patterns first
   if (policy.denied_patterns) {
     for (const pat of policy.denied_patterns) {
-      try {
-        if (new RegExp(pat).test(command)) {
-          return { allowed: false, reason: `denied by pattern: ${pat}` };
-        }
-      } catch {
-        // skip invalid regex
+      const re = createSafeRegExp(pat);
+      if (re && re.test(command)) {
+        return { allowed: false, reason: `denied by pattern: ${pat}` };
       }
     }
   }
@@ -168,13 +174,10 @@ function checkSecurity(command: string): { allowed: boolean; reason?: string } {
 
     if (policy.allowed_patterns) {
       for (const pat of policy.allowed_patterns) {
-        try {
-          if (new RegExp(pat).test(command)) {
-            patternAllowed = true;
-            break;
-          }
-        } catch {
-          // skip invalid regex
+        const re = createSafeRegExp(pat);
+        if (re && re.test(command)) {
+          patternAllowed = true;
+          break;
         }
       }
     }
@@ -183,6 +186,18 @@ function checkSecurity(command: string): { allowed: boolean; reason?: string } {
       return {
         allowed: false,
         reason: `command '${cmdBase}' not in allowlist`,
+      };
+    }
+  }
+
+  // Default-deny: when no policy file exists, only allow known-safe commands
+  // If a policy file was explicitly loaded (even if empty), respect it as intentional
+  if (!policyLoadedFrom) {
+    const cmdBase = command.split(WHITESPACE_SPLIT_PATTERN)[0];
+    if (!DEFAULT_SAFE_COMMANDS.has(cmdBase)) {
+      return {
+        allowed: false,
+        reason: `command '${cmdBase}' not in default safe list (create .omc/config/live-data-policy.json to customize)`,
       };
     }
   }

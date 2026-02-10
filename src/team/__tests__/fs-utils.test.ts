@@ -15,7 +15,7 @@ afterEach(() => {
 });
 
 describe('atomicWriteJson', () => {
-  it('creates files with 0o600 permissions', () => {
+  it.skipIf(process.platform === 'win32')('creates files with 0o600 permissions', () => {
     mkdirSync(TEST_DIR, { recursive: true });
     const filePath = join(TEST_DIR, 'test.json');
     atomicWriteJson(filePath, { key: 'value' });
@@ -47,7 +47,7 @@ describe('atomicWriteJson', () => {
 });
 
 describe('writeFileWithMode', () => {
-  it('creates files with 0o600 permissions', () => {
+  it.skipIf(process.platform === 'win32')('creates files with 0o600 permissions', () => {
     mkdirSync(TEST_DIR, { recursive: true });
     const filePath = join(TEST_DIR, 'write-test.txt');
     writeFileWithMode(filePath, 'hello');
@@ -57,7 +57,7 @@ describe('writeFileWithMode', () => {
 });
 
 describe('ensureDirWithMode', () => {
-  it('creates directories with 0o700 permissions', () => {
+  it.skipIf(process.platform === 'win32')('creates directories with 0o700 permissions', () => {
     const dirPath = join(TEST_DIR, 'secure-dir');
     ensureDirWithMode(dirPath);
     const stat = statSync(dirPath);

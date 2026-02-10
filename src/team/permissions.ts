@@ -118,9 +118,12 @@ export function isPathAllowed(
   // If path escapes working directory, always deny
   if (relPath.startsWith('..')) return false;
 
+  // Normalize to forward slashes for cross-platform glob matching
+  const normalizedPath = relPath.replace(/\\/g, '/');
+
   // Check denied paths first (they override)
   for (const pattern of permissions.deniedPaths) {
-    if (matchGlob(pattern, relPath)) return false;
+    if (matchGlob(pattern, normalizedPath)) return false;
   }
 
   // If no allowed paths specified, allow all within workingDirectory
@@ -128,7 +131,7 @@ export function isPathAllowed(
 
   // Check allowed paths
   for (const pattern of permissions.allowedPaths) {
-    if (matchGlob(pattern, relPath)) return true;
+    if (matchGlob(pattern, normalizedPath)) return true;
   }
 
   return false;
@@ -260,7 +263,8 @@ export function findPermissionViolations(
         reason = `Path escapes working directory: ${relPath}`;
       } else {
         // Find which deny pattern matched
-        const matchedDeny = permissions.deniedPaths.find(p => matchGlob(p, relPath));
+        const normalizedRel = relPath.replace(/\\/g, '/');
+        const matchedDeny = permissions.deniedPaths.find(p => matchGlob(p, normalizedRel));
         if (matchedDeny) {
           reason = `Matches denied pattern: ${matchedDeny}`;
         } else {
@@ -268,7 +272,7 @@ export function findPermissionViolations(
         }
       }
 
-      violations.push({ path: relPath, reason });
+      violations.push({ path: relPath.replace(/\\/g, '/'), reason });
     }
   }
 

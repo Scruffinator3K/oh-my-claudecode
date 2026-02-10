@@ -5,6 +5,7 @@
 
 import fs from 'fs/promises';
 import path from 'path';
+import { escapeRegExp } from '../../lib/safe-regexp.js';
 import {
   ProjectMemory,
   TechStack,
@@ -440,7 +441,7 @@ async function detectFrameworksFromCargoToml(filePath: string): Promise<Framewor
     const deps = ['axum', 'actix-web', 'rocket', 'tokio', 'async-std'];
 
     for (const dep of deps) {
-      const regex = new RegExp(`^${dep}\\s*=`, 'm');
+      const regex = new RegExp(`^${escapeRegExp(dep)}\\s*=`, 'm');
       if (regex.test(content) && FRAMEWORK_PATTERNS[dep]) {
         frameworks.push({
           name: dep,
@@ -467,7 +468,7 @@ async function detectFrameworksFromPyproject(filePath: string): Promise<Framewor
     const deps = ['fastapi', 'django', 'flask', 'pytest'];
 
     for (const dep of deps) {
-      const regex = new RegExp(`["']${dep}`, 'm');
+      const regex = new RegExp(`["']${escapeRegExp(dep)}`, 'm');
       if (regex.test(content) && FRAMEWORK_PATTERNS[dep]) {
         frameworks.push({
           name: dep,

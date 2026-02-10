@@ -6,6 +6,7 @@
  */
 
 import type { MagicKeyword, PluginConfig } from '../shared/types.js';
+import { escapeRegExp } from '../lib/safe-regexp.js';
 
 /**
  * Code block pattern for stripping from detection
@@ -330,7 +331,7 @@ Use maximum cognitive effort before responding.`;
 function removeTriggerWords(prompt: string, triggers: string[]): string {
   let result = prompt;
   for (const trigger of triggers) {
-    const regex = new RegExp(`\\b${trigger}\\b`, 'gi');
+    const regex = new RegExp(`\\b${escapeRegExp(trigger)}\\b`, 'gi');
     result = result.replace(regex, '');
   }
   return result.trim();
@@ -385,7 +386,7 @@ export function createMagicKeywordProcessor(config?: PluginConfig['magicKeywords
 
     for (const keyword of keywords) {
       const hasKeyword = keyword.triggers.some(trigger => {
-        const regex = new RegExp(`\\b${trigger}\\b`, 'i');
+        const regex = new RegExp(`\\b${escapeRegExp(trigger)}\\b`, 'i');
         return regex.test(removeCodeBlocks(result));
       });
 
@@ -428,7 +429,7 @@ export function detectMagicKeywords(prompt: string, config?: PluginConfig['magic
 
   for (const keyword of keywords) {
     for (const trigger of keyword.triggers) {
-      const regex = new RegExp(`\\b${trigger}\\b`, 'i');
+      const regex = new RegExp(`\\b${escapeRegExp(trigger)}\\b`, 'i');
       if (regex.test(cleanedPrompt)) {
         detected.push(trigger);
         break;

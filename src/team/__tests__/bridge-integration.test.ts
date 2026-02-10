@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { mkdirSync, writeFileSync, rmSync, existsSync, readFileSync, statSync, realpathSync } from 'fs';
-import { join, resolve } from 'path';
+import { join, resolve, sep } from 'path';
 import { homedir, tmpdir } from 'os';
 import type { BridgeConfig, TaskFile, OutboxMessage } from '../types.js';
 import { readTask, updateTask } from '../task-file-ops.js';
@@ -167,20 +167,23 @@ describe('validateBridgeWorkingDirectory logic', () => {
     }
     const resolved = realpathSync(workingDirectory);
     const home = homedir();
-    if (!resolved.startsWith(home + '/') && resolved !== home) {
+    if (!resolved.startsWith(home + sep) && resolved !== home) {
       throw new Error(`workingDirectory is outside home directory: ${resolved}`);
     }
   }
 
   it('rejects /etc as working directory', () => {
-    expect(() => validateBridgeWorkingDirectory('/etc')).toThrow('outside home directory');
+    // On Windows, /etc resolves to C:\etc which may not exist (throws "does not exist")
+    // On Unix, /etc exists but is outside home (throws "outside home directory")
+    expect(() => validateBridgeWorkingDirectory('/etc')).toThrow(/outside home directory|does not exist/);
   });
 
   it('rejects /tmp as working directory (outside home)', () => {
     // /tmp is typically outside $HOME
     const home = homedir();
-    if (!'/tmp'.startsWith(home)) {
-      expect(() => validateBridgeWorkingDirectory('/tmp')).toThrow('outside home directory');
+    const resolvedTmp = resolve('/tmp');
+    if (!resolvedTmp.startsWith(home)) {
+      expect(() => validateBridgeWorkingDirectory('/tmp')).toThrow(/outside home directory|does not exist/);
     }
   });
 

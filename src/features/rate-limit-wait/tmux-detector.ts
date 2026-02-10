@@ -22,11 +22,13 @@ function isValidPaneId(paneId: string): boolean {
 
 /**
  * Sanitize text for use in tmux send-keys command
- * Escapes single quotes to prevent command injection
+ * Escapes characters that could cause command injection
  */
 function sanitizeForTmux(text: string): string {
-  // Escape single quotes by ending the quote, adding escaped quote, and reopening
-  return text.replace(/'/g, "'\\''");
+  return text
+    .replace(/\\/g, '\\\\')   // Escape backslashes first
+    .replace(/'/g, "'\\''")    // Escape single quotes
+    .replace(/;/g, '\\;');     // Escape semicolons (tmux command separator)
 }
 
 /** Rate limit message patterns to detect in pane content */
@@ -271,8 +273,12 @@ export function sendResumeSequence(paneId: string): boolean {
   }
 
   try {
-    // Send "1" to select the first option (typically "Continue" or similar)
-    execSync(`tmux send-keys -t '${paneId}' '1' Enter`, {
+    // Send "1" literally (with -l flag to prevent tmux key interpretation)
+    execSync(`tmux send-keys -t '${paneId}' -l '1'`, {
+      timeout: 2000,
+    });
+    // Send Enter as a separate command (without -l, so tmux interprets it as a key)
+    execSync(`tmux send-keys -t '${paneId}' Enter`, {
       timeout: 2000,
     });
 
@@ -301,10 +307,16 @@ export function sendToPane(paneId: string, text: string, pressEnter = true): boo
 
   try {
     const sanitizedText = sanitizeForTmux(text);
-    const enterSuffix = pressEnter ? ' Enter' : '';
-    execSync(`tmux send-keys -t '${paneId}' '${sanitizedText}'${enterSuffix}`, {
+    // Send text literally with -l flag to prevent tmux key interpretation
+    execSync(`tmux send-keys -t '${paneId}' -l '${sanitizedText}'`, {
       timeout: 2000,
     });
+    // Send Enter separately if requested (without -l, so tmux interprets it as a key)
+    if (pressEnter) {
+      execSync(`tmux send-keys -t '${paneId}' Enter`, {
+        timeout: 2000,
+      });
+    }
     return true;
   } catch (error) {
     console.error(`[TmuxDetector] Error sending to pane ${paneId}:`, error);

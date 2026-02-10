@@ -9,6 +9,7 @@
  */
 
 import { spawn } from 'child_process';
+import { resolveCommand } from '../lib/resolve-command.js';
 import { existsSync, mkdirSync, readFileSync, realpathSync, statSync, writeFileSync } from 'fs';
 import { dirname, resolve, relative, sep, isAbsolute, basename, join } from 'path';
 import { createStdoutCollector, safeWriteOutputFile } from './shared-exec.js';
@@ -183,12 +184,9 @@ export function executeCodex(prompt: string, model: string, cwd?: string): Promi
     validateModelName(model);
     let settled = false;
     const args = ['exec', '-m', model, '--json', '--full-auto'];
-    const child = spawn('codex', args, {
+    const child = spawn(resolveCommand('codex'), args, {
       stdio: ['pipe', 'pipe', 'pipe'],
       ...(cwd ? { cwd } : {}),
-      // shell: true needed on Windows for .cmd/.bat executables.
-      // Safe: args are array-based and model names are regex-validated.
-      ...(process.platform === 'win32' ? { shell: true } : {})
     });
 
     // Manual timeout handling to ensure proper cleanup
@@ -329,13 +327,10 @@ export function executeCodexBackground(
     const trySpawnWithModel = (tryModel: string, remainingModels: string[]): { pid: number } | { error: string } => {
       validateModelName(tryModel);
       const args = ['exec', '-m', tryModel, '--json', '--full-auto'];
-      const child = spawn('codex', args, {
+      const child = spawn(resolveCommand('codex'), args, {
         detached: process.platform !== 'win32',
         stdio: ['pipe', 'pipe', 'pipe'],
         ...(workingDirectory ? { cwd: workingDirectory } : {}),
-        // shell: true needed on Windows for .cmd/.bat executables.
-        // Safe: args are array-based and model names are regex-validated.
-        ...(process.platform === 'win32' ? { shell: true } : {})
       });
 
       if (!child.pid) {

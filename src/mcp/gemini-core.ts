@@ -13,6 +13,7 @@
  */
 
 import { spawn } from 'child_process';
+import { resolveCommand } from '../lib/resolve-command.js';
 import { existsSync, mkdirSync, readFileSync, realpathSync, statSync, writeFileSync } from 'fs';
 import { dirname, resolve, relative, sep, isAbsolute, basename, join } from 'path';
 import { createStdoutCollector, safeWriteOutputFile } from './shared-exec.js';
@@ -90,12 +91,9 @@ export function executeGemini(prompt: string, model?: string, cwd?: string): Pro
     if (model) {
       args.push('--model', model);
     }
-    const child = spawn('gemini', args, {
+    const child = spawn(resolveCommand('gemini'), args, {
       stdio: ['pipe', 'pipe', 'pipe'],
       ...(cwd ? { cwd } : {}),
-      // shell: true needed on Windows for .cmd/.bat executables.
-      // Safe: args are array-based and model names are regex-validated.
-      ...(process.platform === 'win32' ? { shell: true } : {})
     });
 
     const timeoutHandle = setTimeout(() => {
@@ -189,11 +187,10 @@ export function executeGeminiBackground(
     const trySpawnWithModel = (tryModel: string, remainingModels: string[]): { pid: number } | { error: string } => {
       validateModelName(tryModel);
       const args = ['-p=.', '--yolo', '--model', tryModel];
-      const child = spawn('gemini', args, {
+      const child = spawn(resolveCommand('gemini'), args, {
         detached: process.platform !== 'win32',
         stdio: ['pipe', 'pipe', 'pipe'],
         ...(workingDirectory ? { cwd: workingDirectory } : {}),
-        ...(process.platform === 'win32' ? { shell: true } : {})
       });
 
       if (!child.pid) {

@@ -16,6 +16,7 @@ import * as fs from "fs";
 import * as path from "path";
 import * as os from "os";
 import { atomicWriteJsonSync } from "../../lib/atomic-write.js";
+import { globToSafeRegExp } from "../../lib/safe-regexp.js";
 import { OmcPaths } from "../../lib/worktree-paths.js";
 import {
   StateLocation,
@@ -382,7 +383,8 @@ export function listStates(options?: ListStatesOptions): StateFileInfo[] {
   const matchesPattern = (name: string): boolean => {
     if (!pattern) return true;
     // Simple glob: * matches anything
-    const regex = new RegExp("^" + pattern.replace(/\*/g, ".*") + "$");
+    const regex = globToSafeRegExp(pattern);
+    if (!regex) return false;
     return regex.test(name);
   };
 
@@ -464,7 +466,8 @@ export function cleanupOrphanedStates(options?: CleanupOptions): CleanupResult {
     // Skip excluded patterns
     if (
       exclude.some((pattern) => {
-        const regex = new RegExp("^" + pattern.replace(/\*/g, ".*") + "$");
+        const regex = globToSafeRegExp(pattern);
+        if (!regex) return false;
         return regex.test(state.name);
       })
     ) {

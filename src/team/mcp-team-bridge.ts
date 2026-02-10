@@ -8,6 +8,7 @@
  */
 
 import { spawn, ChildProcess } from 'child_process';
+import { resolveCommand } from '../lib/resolve-command.js';
 import { existsSync, readFileSync, openSync, readSync, closeSync } from 'fs';
 import { join } from 'path';
 import { writeFileWithMode, ensureDirWithMode } from './fs-utils.js';
@@ -349,10 +350,9 @@ function spawnCliProcess(
     if (model) args.push('--model', model);
   }
 
-  const child = spawn(cmd, args, {
+  const child = spawn(resolveCommand(cmd), args, {
     stdio: ['pipe', 'pipe', 'pipe'],
     cwd,
-    ...(process.platform === 'win32' ? { shell: true } : {})
   });
 
   const result = new Promise<string>((resolve, reject) => {

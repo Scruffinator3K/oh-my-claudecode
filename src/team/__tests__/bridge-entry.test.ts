@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'fs';
-import { join } from 'path';
+import { join, resolve } from 'path';
 import { validateConfigPath } from '../bridge-entry.js';
 
 describe('bridge-entry security', () => {
@@ -15,8 +15,8 @@ describe('bridge-entry security', () => {
   });
 
   it('validates config path is under ~/.claude/ or .omc/', () => {
-    expect(source).toContain('.claude/');
-    expect(source).toContain('.omc/');
+    expect(source).toContain('.claude');
+    expect(source).toContain('.omc');
   });
 
   it('sanitizes team and worker names', () => {
@@ -29,7 +29,7 @@ describe('bridge-entry security', () => {
   });
 
   it('checks path is under homedir', () => {
-    expect(source).toContain("home + '/'");
+    expect(source).toContain('+ sep)');
   });
 
   it('verifies git worktree', () => {
@@ -71,22 +71,23 @@ describe('bridge-entry security', () => {
 });
 
 describe('validateConfigPath', () => {
-  const home = '/home/user';
+  // Use resolve() so paths get drive letter prefix on Windows
+  const home = resolve('/home/user');
 
   it('should reject paths outside home directory', () => {
     expect(validateConfigPath('/tmp/.omc/config.json', home)).toBe(false);
   });
 
   it('should reject paths without trusted subpath', () => {
-    expect(validateConfigPath('/home/user/project/config.json', home)).toBe(false);
+    expect(validateConfigPath(resolve('/home/user/project/config.json'), home)).toBe(false);
   });
 
   it('should accept paths under ~/.claude/', () => {
-    expect(validateConfigPath('/home/user/.claude/teams/foo/config.json', home)).toBe(true);
+    expect(validateConfigPath(resolve('/home/user/.claude/teams/foo/config.json'), home)).toBe(true);
   });
 
   it('should accept paths under project/.omc/', () => {
-    expect(validateConfigPath('/home/user/project/.omc/state/config.json', home)).toBe(true);
+    expect(validateConfigPath(resolve('/home/user/project/.omc/state/config.json'), home)).toBe(true);
   });
 
   it('should reject path that matches subpath but not home', () => {
@@ -95,6 +96,6 @@ describe('validateConfigPath', () => {
 
   it('should reject path traversal via ../ that escapes trusted subpath', () => {
     // ~/foo/.claude/../../evil.json resolves to ~/evil.json (no trusted subpath)
-    expect(validateConfigPath('/home/user/foo/.claude/../../evil.json', home)).toBe(false);
+    expect(validateConfigPath(resolve('/home/user/foo/.claude/../../evil.json'), home)).toBe(false);
   });
 });

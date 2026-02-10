@@ -6,7 +6,11 @@
  * 1. Priority Context - Always loaded, critical discoveries (max 500 chars)
  * 2. Working Memory - Session notes, auto-pruned after 7 days
  * 3. MANUAL - User content, never auto-pruned
- *
+ */
+
+import { escapeRegExp } from '../../lib/safe-regexp.js';
+
+/**
  * Structure:
  * ```markdown
  * # Notepad
@@ -156,7 +160,7 @@ export function readNotepad(directory: string): string | null {
 function extractSection(content: string, header: string): string | null {
   // Match from header to next section (## followed by space, at start of line)
   // We need to match ## at the start of a line, not ### which is a subsection
-  const regex = new RegExp(`${header}\\n([\\s\\S]*?)(?=\\n## [^#]|$)`);
+  const regex = new RegExp(`${escapeRegExp(header)}\\n([\\s\\S]*?)(?=\\n## [^#]|$)`);
   const match = content.match(regex);
   if (!match) {
     return null;
@@ -177,11 +181,11 @@ function replaceSection(
   header: string,
   newContent: string,
 ): string {
-  const regex = new RegExp(`(${header}\\n)([\\s\\S]*?)(?=## |$)`);
+  const regex = new RegExp(`(${escapeRegExp(header)}\\n)([\\s\\S]*?)(?=## |$)`);
 
   // Preserve comment if it exists
   const commentMatch = content.match(
-    new RegExp(`${header}\\n(<!--[\\s\\S]*?-->)`),
+    new RegExp(`${escapeRegExp(header)}\\n(<!--[\\s\\S]*?-->)`),
   );
   const comment = commentMatch ? commentMatch[1] + "\n" : "";
 

@@ -6,7 +6,7 @@
 // Config via temp file, not inline JSON argument.
 
 import { readFileSync, statSync, realpathSync } from 'fs';
-import { resolve } from 'path';
+import { resolve, sep } from 'path';
 import { homedir } from 'os';
 import type { BridgeConfig } from './types.js';
 import { runBridge } from './mcp-team-bridge.js';
@@ -24,8 +24,8 @@ export function validateConfigPath(configPath: string, homeDir: string): boolean
   // Resolve to canonical absolute path to defeat ".." traversal
   const resolved = resolve(configPath);
 
-  const isUnderHome = resolved.startsWith(homeDir + '/') || resolved === homeDir;
-  const isTrustedSubpath = resolved.includes('/.claude/') || resolved.includes('/.omc/');
+  const isUnderHome = resolved.startsWith(homeDir + sep) || resolved === homeDir;
+  const isTrustedSubpath = resolved.includes(sep + '.claude' + sep) || resolved.includes(sep + '.omc' + sep);
   if (!isUnderHome || !isTrustedSubpath) return false;
 
   // Additionally verify via realpathSync on the parent directory (if it exists)
@@ -33,7 +33,7 @@ export function validateConfigPath(configPath: string, homeDir: string): boolean
   try {
     const parentDir = resolve(resolved, '..');
     const realParent = realpathSync(parentDir);
-    if (!realParent.startsWith(homeDir + '/') && realParent !== homeDir) {
+    if (!realParent.startsWith(homeDir + sep) && realParent !== homeDir) {
       return false;
     }
   } catch {
@@ -64,7 +64,7 @@ function validateBridgeWorkingDirectory(workingDirectory: string): void {
   // Resolve symlinks and verify under homedir
   const resolved = realpathSync(workingDirectory);
   const home = homedir();
-  if (!resolved.startsWith(home + '/') && resolved !== home) {
+  if (!resolved.startsWith(home + sep) && resolved !== home) {
     throw new Error(`workingDirectory is outside home directory: ${resolved}`);
   }
 
