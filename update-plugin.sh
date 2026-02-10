@@ -23,6 +23,7 @@ CACHE_DIR="$HOME/.claude/plugins/cache/omc/oh-my-claudecode/$PLUGIN_VERSION"
 PATCHED_BRANCH="security-hardened"
 UPSTREAM_REMOTE="origin"
 UPSTREAM_BRANCH="main"
+FORK_REMOTE="fork"
 
 # Runtime directories to copy (no src/, tests, or dev files)
 RUNTIME_DIRS=(dist bridge scripts skills agents commands hooks .claude-plugin docs templates node_modules)
@@ -225,6 +226,18 @@ BACKUP_COUNT="$(ls -d $BACKUP_PATTERN 2>/dev/null | wc -l)"
 if [ "$BACKUP_COUNT" -gt 3 ]; then
   info "Cleaning old backups (keeping 3 most recent)..."
   ls -dt $BACKUP_PATTERN | tail -n +4 | xargs rm -rf
+fi
+
+# ---------------------------------------------------------------------------
+# Push updated branch to fork
+# ---------------------------------------------------------------------------
+if git remote get-url "$FORK_REMOTE" &>/dev/null; then
+  info "Pushing $PATCHED_BRANCH to $FORK_REMOTE..."
+  if git push "$FORK_REMOTE" "$PATCHED_BRANCH" 2>&1; then
+    info "Fork updated."
+  else
+    warn "Could not push to fork. Push manually: git push $FORK_REMOTE $PATCHED_BRANCH"
+  fi
 fi
 
 info ""
