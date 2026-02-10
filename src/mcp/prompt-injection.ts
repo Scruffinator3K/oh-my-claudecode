@@ -51,9 +51,9 @@ export function getValidAgentRoles(): string[] {
       .filter(f => f.endsWith('.md'))
       .map(f => basename(f, '.md'))
       .sort();
-  } catch {
-    // Fallback: if agents dir is not readable, return empty
-    console.warn('[prompt-injection] Could not scan agents/ directory for role discovery');
+  } catch (err) {
+    // Fail closed: elevated error logging so startup issues are visible
+    console.error('[prompt-injection] CRITICAL: Could not scan agents/ directory for role discovery:', err);
     _cachedRoles = [];
   }
 

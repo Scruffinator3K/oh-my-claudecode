@@ -496,6 +496,16 @@ export async function handleAskGemini(args: {
       isError: true
     };
   }
+  // Validate agent_role exists in discovered roles (allowlist enforcement)
+  if (!VALID_AGENT_ROLES.includes(agent_role)) {
+    return {
+      content: [{
+        type: 'text' as const,
+        text: `Unknown agent_role: "${agent_role}". Available roles: ${VALID_AGENT_ROLES.join(', ')}. Recommended for Gemini: ${GEMINI_RECOMMENDED_ROLES.join(', ')}`
+      }],
+      isError: true
+    };
+  }
 
   // Validate output_file is provided
   if (!args.output_file || !args.output_file.trim()) {

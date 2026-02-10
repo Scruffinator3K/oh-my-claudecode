@@ -47,6 +47,16 @@ describe('prompt_file-only enforcement', () => {
       expect(result.isError).toBe(true);
       expect(result.content[0].text).toContain('Invalid agent_role');
     });
+
+    it('should return error for unknown but syntactically valid agent_role', async () => {
+      const result = await handleAskCodex({
+        prompt_file: 'some-file.md',
+        agent_role: 'totally-fake-agent', // passes regex but not in allowlist
+        output_file: '/tmp/test-output.md',
+      });
+      expect(result.isError).toBe(true);
+      expect(result.content[0].text).toContain('Unknown agent_role');
+    });
   });
 
   describe('handleAskGemini', () => {
@@ -79,6 +89,16 @@ describe('prompt_file-only enforcement', () => {
       });
       expect(result.isError).toBe(true);
       expect(result.content[0].text).toContain('Invalid agent_role');
+    });
+
+    it('should return error for unknown but syntactically valid agent_role', async () => {
+      const result = await handleAskGemini({
+        prompt_file: 'some-file.md',
+        agent_role: 'totally-fake-agent', // passes regex but not in allowlist
+        output_file: '/tmp/test-output.md',
+      });
+      expect(result.isError).toBe(true);
+      expect(result.content[0].text).toContain('Unknown agent_role');
     });
   });
 });
