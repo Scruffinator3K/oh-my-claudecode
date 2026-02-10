@@ -6,6 +6,8 @@
  * file ownership and dependency tracking.
  */
 
+import { globToSafeRegExp } from '../../lib/safe-regexp.js';
+
 /**
  * Agent type for task execution, determines model complexity
  */
@@ -430,10 +432,9 @@ export function extractSharedFiles(
     const fileName = file.split('/').pop() || file;
     return patterns.some((pattern) => {
       if (pattern.includes('*')) {
-        // Basic glob: convert to regex
-        const regex = new RegExp(
-          '^' + pattern.replace(/\./g, '\\.').replace(/\*/g, '.*') + '$'
-        );
+        // Basic glob: convert to safe regex
+        const regex = globToSafeRegExp(pattern);
+        if (!regex) return false;
         return regex.test(file) || regex.test(fileName);
       }
       return file === pattern || fileName === pattern;

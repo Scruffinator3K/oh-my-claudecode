@@ -1,5 +1,5 @@
 // Smart skill matcher with fuzzy matching, pattern detection, and confidence scoring
-// No external dependencies - uses built-in only
+import { globToSafeRegExp, createSafeRegExp } from '../../lib/safe-regexp.js';
 
 export interface MatchResult {
   skillId: string;
@@ -174,14 +174,9 @@ function levenshteinDistance(str1: string, str2: string): number {
 function patternMatch(text: string, pattern: string): number {
   // Check for glob-like patterns
   if (pattern.includes('*')) {
-    const regexPattern = pattern.replace(/\*/g, '.*');
-    try {
-      const regex = new RegExp(regexPattern, 'i');
-      if (regex.test(text)) {
-        return 85; // High confidence for pattern match
-      }
-    } catch {
-      // Invalid regex, skip
+    const regex = globToSafeRegExp(pattern, 'i');
+    if (regex && regex.test(text)) {
+      return 85; // High confidence for pattern match
     }
   }
 
@@ -189,14 +184,10 @@ function patternMatch(text: string, pattern: string): number {
   // Supports: /pattern/ or /pattern/flags (e.g., /error/i)
   const regexMatch = pattern.match(/^\/(.+)\/([gimsuy]*)$/);
   if (regexMatch) {
-    try {
-      const [, regexPattern, flags] = regexMatch;
-      const regex = new RegExp(regexPattern, flags || 'i');
-      if (regex.test(text)) {
-        return 90; // Very high confidence for explicit regex match
-      }
-    } catch {
-      // Invalid regex, skip
+    const [, regexPattern, flags] = regexMatch;
+    const regex = createSafeRegExp(regexPattern, flags || 'i');
+    if (regex && regex.test(text)) {
+      return 90; // Very high confidence for explicit regex match
     }
   }
 

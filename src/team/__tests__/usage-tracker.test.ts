@@ -57,7 +57,7 @@ describe('usage-tracker', () => {
       expect(lines).toHaveLength(2);
     });
 
-    it('creates log with correct permissions', () => {
+    it.skipIf(process.platform === 'win32')('creates log with correct permissions', () => {
       recordTaskUsage(testDir, 'test-team', makeRecord('worker1', 'task1'));
 
       const logPath = join(testDir, '.omc', 'logs', 'team-usage-test-team.jsonl');

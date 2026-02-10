@@ -1,5 +1,6 @@
 import type { ShellHook } from "./types.js"
 import { HOOK_NAME, NON_INTERACTIVE_ENV, SHELL_COMMAND_PATTERNS } from "./constants.js"
+import { escapeRegExp } from "../../lib/safe-regexp.js"
 
 export * from "./constants.js"
 export * from "./detector.js"
@@ -7,7 +8,7 @@ export * from "./types.js"
 
 const BANNED_COMMAND_PATTERNS = SHELL_COMMAND_PATTERNS.banned
   .filter((cmd: string) => !cmd.includes("("))
-  .map((cmd: string) => new RegExp(`\\b${cmd}\\b`))
+  .map((cmd: string) => new RegExp(`\\b${escapeRegExp(cmd)}\\b`))
 
 function detectBannedCommand(command: string): string | undefined {
   for (let i = 0; i < BANNED_COMMAND_PATTERNS.length; i++) {

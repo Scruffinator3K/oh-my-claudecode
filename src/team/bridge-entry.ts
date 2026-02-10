@@ -6,7 +6,7 @@
 // Config via temp file, not inline JSON argument.
 
 import { readFileSync, statSync, realpathSync } from 'fs';
-import { resolve } from 'path';
+import { resolve, sep } from 'path';
 import { homedir } from 'os';
 import type { BridgeConfig } from './types.js';
 import { runBridge } from './mcp-team-bridge.js';
@@ -25,15 +25,15 @@ export function validateConfigPath(configPath: string, homeDir: string, claudeCo
   // Resolve to canonical absolute path to defeat ".." traversal
   const resolved = resolve(configPath);
 
-  const isUnderHome = resolved.startsWith(homeDir + '/') || resolved === homeDir;
+  const isUnderHome = resolved.startsWith(homeDir + sep) || resolved === homeDir;
   const normalizedConfigDir = resolve(claudeConfigDir);
   const normalizedOmcDir = resolve(homeDir, '.omc');
-  const hasOmcComponent = resolved.includes('/.omc/') || resolved.endsWith('/.omc');
+  const hasOmcComponent = resolved.includes(sep + '.omc' + sep) || resolved.endsWith(sep + '.omc');
   const isTrustedSubpath =
     resolved === normalizedConfigDir ||
-    resolved.startsWith(normalizedConfigDir + '/') ||
+    resolved.startsWith(normalizedConfigDir + sep) ||
     resolved === normalizedOmcDir ||
-    resolved.startsWith(normalizedOmcDir + '/') ||
+    resolved.startsWith(normalizedOmcDir + sep) ||
     hasOmcComponent;
   if (!isUnderHome || !isTrustedSubpath) return false;
 
@@ -42,7 +42,7 @@ export function validateConfigPath(configPath: string, homeDir: string, claudeCo
   try {
     const parentDir = resolve(resolved, '..');
     const realParent = realpathSync(parentDir);
-    if (!realParent.startsWith(homeDir + '/') && realParent !== homeDir) {
+    if (!realParent.startsWith(homeDir + sep) && realParent !== homeDir) {
       return false;
     }
   } catch {
@@ -73,7 +73,7 @@ function validateBridgeWorkingDirectory(workingDirectory: string): void {
   // Resolve symlinks and verify under homedir
   const resolved = realpathSync(workingDirectory);
   const home = homedir();
-  if (!resolved.startsWith(home + '/') && resolved !== home) {
+  if (!resolved.startsWith(home + sep) && resolved !== home) {
     throw new Error(`workingDirectory is outside home directory: ${resolved}`);
   }
 

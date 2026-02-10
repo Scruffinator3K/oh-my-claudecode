@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { mkdirSync, writeFileSync, existsSync, rmSync } from 'fs';
+import { mkdirSync, mkdtempSync, writeFileSync, existsSync, rmSync } from 'fs';
 import { join } from 'path';
+import { tmpdir } from 'os';
 import {
   initJobDb,
   closeJobDb,
@@ -20,9 +21,9 @@ import {
 } from '../mcp/job-state-db.js';
 import type { JobStatus } from '../mcp/prompt-persistence.js';
 
-// Test fixtures
-const TEST_DIR = join(process.cwd(), '.test-job-state-db-' + process.pid);
-const PROMPTS_DIR = join(TEST_DIR, '.omc', 'prompts');
+// Test fixtures - use unique temp dirs to avoid EBUSY on Windows
+let TEST_DIR: string;
+let PROMPTS_DIR: string;
 
 function createTestJob(overrides: Partial<JobStatus> = {}): JobStatus {
   return {
@@ -42,17 +43,19 @@ function createTestJob(overrides: Partial<JobStatus> = {}): JobStatus {
 
 describe('job-state-db', () => {
   beforeEach(async () => {
-    // Clean up any previous test state
-    if (existsSync(TEST_DIR)) {
-      rmSync(TEST_DIR, { recursive: true, force: true });
-    }
+    // Close any db from a previous test before creating a new temp dir
+    closeJobDb();
+    TEST_DIR = mkdtempSync(join(tmpdir(), 'job-state-db-test-'));
+    PROMPTS_DIR = join(TEST_DIR, '.omc', 'prompts');
     mkdirSync(TEST_DIR, { recursive: true });
   });
 
   afterEach(() => {
     closeJobDb();
-    if (existsSync(TEST_DIR)) {
+    try {
       rmSync(TEST_DIR, { recursive: true, force: true });
+    } catch {
+      // On Windows, SQLite db files may remain locked briefly after close
     }
   });
 

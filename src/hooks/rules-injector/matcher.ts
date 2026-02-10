@@ -9,21 +9,15 @@
 import { createHash } from 'crypto';
 import { relative } from 'path';
 import type { RuleMetadata, MatchResult } from './types.js';
+import { globToSafeRegExp } from '../../lib/safe-regexp.js';
 
 /**
  * Simple glob pattern matcher.
  * Supports basic patterns like *.ts, **\/*.js, src/**\/*.py
  */
 function matchGlob(pattern: string, filePath: string): boolean {
-  // Convert glob pattern to regex
-  const regexStr = pattern
-    .replace(/\./g, '\\.')           // Escape dots
-    .replace(/\*\*/g, '<<<GLOBSTAR>>>')  // Temporarily replace **
-    .replace(/\*/g, '[^/]*')         // * matches any characters except /
-    .replace(/<<<GLOBSTAR>>>/g, '.*') // ** matches anything including /
-    .replace(/\?/g, '.');            // ? matches single character
-
-  const regex = new RegExp(`^${regexStr}$`);
+  const regex = globToSafeRegExp(pattern);
+  if (!regex) return false;
   return regex.test(filePath);
 }
 

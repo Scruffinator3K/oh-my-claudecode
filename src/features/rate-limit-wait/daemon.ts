@@ -15,7 +15,7 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync, unlinkSync, chmodSync, statSync, appendFileSync, renameSync } from 'fs';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
-import { homedir } from 'os';
+import { homedir, tmpdir } from 'os';
 import { spawn } from 'child_process';
 import { checkRateLimitStatus, formatRateLimitStatus, formatTimeUntilReset } from './rate-limit-monitor.js';
 import {
@@ -420,20 +420,27 @@ export function startDaemon(config?: DaemonConfig): DaemonResponse {
 
   ensureStateDir(cfg);
 
-  // Fork a new process for the daemon using dynamic import() for ESM compatibility.
-  // The project uses "type": "module", so require() would fail with ERR_REQUIRE_ESM.
+  // Fork a new process for the daemon.
+  // Write config to temp file instead of interpolating into script string —
+  // prevents code injection if config values contain JavaScript characters.
+  const configTempPath = join(tmpdir(), `omc-daemon-cfg-${process.pid}-${Date.now()}.json`);
+  writeSecureFile(configTempPath, JSON.stringify(cfg));
+
   const modulePath = __filename.replace(/\.ts$/, '.js');
-  const daemonScript = `
-    import('${modulePath}').then(({ pollLoop }) => {
-      const config = ${JSON.stringify(cfg)};
-      return pollLoop(config);
-    }).catch((err) => { console.error(err); process.exit(1); });
-  `;
+  // Use require('fs') (always available in plain node scripts) to read the temp
+  // config file, then dynamic import() for ESM-compatible module loading.
+  const daemonScript = [
+    `const fs = require('fs');`,
+    `const cfgPath = process.argv[1];`,
+    `const config = JSON.parse(fs.readFileSync(cfgPath, 'utf-8'));`,
+    `try { fs.unlinkSync(cfgPath); } catch {}`,
+    `import(String.raw\`${modulePath}\`).then(({ pollLoop }) => pollLoop(config)).catch(console.error);`,
+  ].join('\n');
 
   try {
     // Use node to run the daemon in background
     // Note: Using minimal env to prevent leaking sensitive credentials
-    const child = spawn('node', ['-e', daemonScript], {
+    const child = spawn('node', ['-e', daemonScript, configTempPath], {
       detached: true,
       stdio: 'ignore',
       cwd: process.cwd(),

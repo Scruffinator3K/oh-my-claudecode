@@ -179,7 +179,7 @@ describe('summary-report', () => {
   });
 
   describe('saveTeamReport', () => {
-    it('saves report to disk with correct permissions', () => {
+    it.skipIf(process.platform === 'win32')('saves report to disk with correct permissions', () => {
       logAuditEvent(testDir, {
         timestamp: '2026-01-01T10:00:00Z',
         eventType: 'bridge_start',
@@ -189,7 +189,7 @@ describe('summary-report', () => {
 
       const filePath = saveTeamReport(testDir, teamName);
       expect(existsSync(filePath)).toBe(true);
-      expect(filePath).toContain('.omc/reports/');
+      expect(filePath).toContain(join('.omc', 'reports'));
       expect(filePath).toContain(teamName);
 
       const stat = statSync(filePath);

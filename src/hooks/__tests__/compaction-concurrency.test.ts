@@ -171,7 +171,7 @@ describe('processPreCompact - Compaction Mutex (issue #453)', () => {
         expect(files2.length).toBe(1);
       }
     } finally {
-      rmSync(tempDir2, { recursive: true, force: true });
+      try { rmSync(tempDir2, { recursive: true, force: true }); } catch { /* EBUSY on Windows */ }
     }
   });
 

@@ -6,7 +6,7 @@
  */
 
 import chalk from 'chalk';
-import { execSync, execFileSync } from 'child_process';
+import { execFileSync } from 'child_process';
 import { existsSync, mkdirSync, rmSync, readdirSync, statSync } from 'fs';
 import { homedir } from 'os';
 import { join, basename, isAbsolute, relative } from 'path';
@@ -212,8 +212,8 @@ function sanitize(str: string, maxLen: number = 30): string {
  */
 function getCurrentRepo(): { owner: string; repo: string; root: string; provider: ProviderName } | null {
   try {
-    const root = execSync('git rev-parse --show-toplevel', { encoding: 'utf-8' }).trim();
-    const remoteUrl = execSync('git remote get-url origin', { encoding: 'utf-8' }).trim();
+    const root = execFileSync('git', ['rev-parse', '--show-toplevel'], { encoding: 'utf-8' }).trim();
+    const remoteUrl = execFileSync('git', ['remote', 'get-url', 'origin'], { encoding: 'utf-8' }).trim();
     const parsed = parseRemoteUrl(remoteUrl);
     if (parsed) {
       return { owner: parsed.owner, repo: parsed.repo, root, provider: parsed.provider };
@@ -264,14 +264,14 @@ function createWorktree(
     }
 
     // Fetch latest from origin
-    execSync(`git fetch origin ${baseBranch}`, {
+    execFileSync('git', ['fetch', 'origin', baseBranch], {
       cwd: repoRoot,
       stdio: 'pipe',
     });
 
     // Create branch from base if it doesn't exist
     try {
-      execSync(`git branch ${branchName} origin/${baseBranch}`, {
+      execFileSync('git', ['branch', branchName, `origin/${baseBranch}`], {
         cwd: repoRoot,
         stdio: 'pipe',
       });
@@ -280,7 +280,7 @@ function createWorktree(
     }
 
     // Create the worktree
-    execSync(`git worktree add "${worktreePath}" ${branchName}`, {
+    execFileSync('git', ['worktree', 'add', worktreePath, branchName], {
       cwd: repoRoot,
       stdio: 'pipe',
     });
@@ -517,7 +517,7 @@ export async function teleportListCommand(options: { json?: boolean }): Promise<
 
     let branch = 'unknown';
     try {
-      branch = execSync('git branch --show-current', {
+      branch = execFileSync('git', ['branch', '--show-current'], {
         cwd: worktreePath,
         encoding: 'utf-8',
       }).trim();
@@ -588,7 +588,7 @@ export async function teleportRemoveCommand(
   try {
     // Check for uncommitted changes
     if (!options.force) {
-      const status = execSync('git status --porcelain', {
+      const status = execFileSync('git', ['status', '--porcelain'], {
         cwd: worktreePath,
         encoding: 'utf-8',
       });
@@ -605,7 +605,7 @@ export async function teleportRemoveCommand(
     }
 
     // Find the main repo to run git worktree remove
-    const gitDir = execSync('git rev-parse --git-dir', {
+    const gitDir = execFileSync('git', ['rev-parse', '--git-dir'], {
       cwd: worktreePath,
       encoding: 'utf-8',
     }).trim();
@@ -616,8 +616,9 @@ export async function teleportRemoveCommand(
     const mainRepo = mainRepoMatch ? mainRepoMatch[1] : null;
 
     if (mainRepo) {
-      const forceFlag = options.force ? '--force' : '';
-      execSync(`git worktree remove "${worktreePath}" ${forceFlag}`, {
+      const args = ['worktree', 'remove', worktreePath];
+      if (options.force) args.push('--force');
+      execFileSync('git', args, {
         cwd: mainRepo,
         stdio: 'pipe',
       });

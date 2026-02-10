@@ -9,6 +9,7 @@
  */
 
 import { spawn } from 'child_process';
+import { resolveCommand } from '../lib/resolve-command.js';
 import { existsSync, mkdirSync, readFileSync, realpathSync, statSync, writeFileSync } from 'fs';
 import { dirname, resolve, relative, sep, isAbsolute, basename, join } from 'path';
 import { createStdoutCollector, safeWriteOutputFile } from './shared-exec.js';
@@ -219,12 +220,9 @@ export function executeCodex(prompt: string, model: string, cwd?: string, reason
     if (reasoningEffort && VALID_REASONING_EFFORTS.includes(reasoningEffort)) {
       args.push('-c', `model_reasoning_effort="${reasoningEffort}"`);
     }
-    const child = spawn('codex', args, {
+    const child = spawn(resolveCommand('codex'), args, {
       stdio: ['pipe', 'pipe', 'pipe'],
       ...(cwd ? { cwd } : {}),
-      // shell: true needed on Windows for .cmd/.bat executables.
-      // Safe: args are array-based and model names are regex-validated.
-      ...(process.platform === 'win32' ? { shell: true } : {})
     });
 
     // Manual timeout handling to ensure proper cleanup
@@ -398,13 +396,10 @@ export function executeCodexBackground(
       if (reasoningEffort && VALID_REASONING_EFFORTS.includes(reasoningEffort)) {
         args.push('-c', `model_reasoning_effort="${reasoningEffort}"`);
       }
-      const child = spawn('codex', args, {
+      const child = spawn(resolveCommand('codex'), args, {
         detached: process.platform !== 'win32',
         stdio: ['pipe', 'pipe', 'pipe'],
         ...(workingDirectory ? { cwd: workingDirectory } : {}),
-        // shell: true needed on Windows for .cmd/.bat executables.
-        // Safe: args are array-based and model names are regex-validated.
-        ...(process.platform === 'win32' ? { shell: true } : {})
       });
 
       if (!child.pid) {

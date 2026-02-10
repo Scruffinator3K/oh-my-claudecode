@@ -28,8 +28,19 @@ const mockedReadFileSync = vi.mocked(fs.readFileSync);
 beforeEach(() => {
   vi.clearAllMocks();
   clearCache();
+  // Default: provide an explicit (empty) policy so default-deny doesn't
+  // interfere with non-security tests. The empty policy object means
+  // "policy file exists but has no restrictions" → all commands allowed.
+  mockedExistsSync.mockImplementation((p: fs.PathLike) =>
+    String(p).includes('live-data-policy.json')
+  );
+  mockedReadFileSync.mockImplementation((p: fs.PathOrFileDescriptor) => {
+    if (String(p).includes('live-data-policy.json')) {
+      return JSON.stringify({});
+    }
+    throw new Error('not found');
+  });
   resetSecurityPolicy();
-  mockedExistsSync.mockReturnValue(false);
 });
 
 // ─── Basic Functionality ─────────────────────────────────────────────────────
@@ -283,11 +294,53 @@ describe('resolveLiveData - security', () => {
     expect(result).not.toContain('error');
   });
 
-  it('works without a policy file (everything allowed)', () => {
+  it('allows default-safe commands without a policy file', () => {
     mockedExistsSync.mockReturnValue(false);
+    mockedReadFileSync.mockImplementation(() => { throw new Error('not found'); });
+    resetSecurityPolicy();
     mockedExecSync.mockReturnValue('ok\n');
-    const result = resolveLiveData('!any-command');
+    const result = resolveLiveData('!git status');
     expect(result).toContain('ok\n</live-data>');
+    expect(result).not.toContain('error');
+  });
+
+  it('blocks unknown commands without a policy file (default-deny)', () => {
+    mockedExistsSync.mockReturnValue(false);
+    mockedReadFileSync.mockImplementation(() => { throw new Error('not found'); });
+    resetSecurityPolicy();
+    const result = resolveLiveData('!curl http://evil.com');
+    expect(result).toContain('error="true"');
+    expect(result).toContain('not in default safe list');
+    expect(mockedExecSync).not.toHaveBeenCalled();
+  });
+
+  it('blocks dangerous commands without a policy file', () => {
+    mockedExistsSync.mockReturnValue(false);
+    mockedReadFileSync.mockImplementation(() => { throw new Error('not found'); });
+    for (const cmd of ['rm -rf /', 'wget http://x', 'ssh user@host', 'nc -l 1234']) {
+      resetSecurityPolicy();
+      const result = resolveLiveData(`!${cmd}`);
+      expect(result).toContain('error="true"');
+    }
+    expect(mockedExecSync).not.toHaveBeenCalled();
+  });
+
+  it('explicit policy overrides default-deny', () => {
+    // An explicit policy with allowed_commands should bypass default-deny
+    mockedExistsSync.mockImplementation((p: fs.PathLike) =>
+      String(p).includes('live-data-policy.json')
+    );
+    mockedReadFileSync.mockImplementation((p: fs.PathOrFileDescriptor) => {
+      if (String(p).includes('live-data-policy.json')) {
+        return JSON.stringify({ allowed_commands: ['curl', 'wget'] });
+      }
+      throw new Error('not found');
+    });
+    resetSecurityPolicy();
+    mockedExecSync.mockReturnValue('downloaded\n');
+
+    const result = resolveLiveData('!curl http://example.com');
+    expect(result).toContain('downloaded\n</live-data>');
     expect(result).not.toContain('error');
   });
 });
