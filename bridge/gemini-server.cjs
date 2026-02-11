@@ -16309,7 +16309,13 @@ init_define_AGENT_ROLES();
 var import_path7 = require("path");
 var import_fs7 = require("fs");
 var import_os = require("os");
-function getConfigDir() {
+
+// src/utils/config-dir.ts
+init_define_AGENT_PROMPTS();
+init_define_AGENT_ROLES();
+
+// src/utils/paths.ts
+function getConfigDir2() {
   if (process.platform === "win32") {
     return process.env.APPDATA || (0, import_path7.join)((0, import_os.homedir)(), "AppData", "Roaming");
   }
@@ -16419,7 +16425,7 @@ var DEFAULT_CONFIG = {
   }
 };
 function getConfigPaths() {
-  const userConfigDir = getConfigDir();
+  const userConfigDir = getConfigDir2();
   return {
     user: (0, import_path8.join)(userConfigDir, "claude-sisyphus", "config.jsonc"),
     project: (0, import_path8.join)(process.cwd(), ".claude", "sisyphus.jsonc")
