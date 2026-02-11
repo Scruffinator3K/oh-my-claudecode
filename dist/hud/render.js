@@ -149,9 +149,15 @@ export async function render(context, config) {
         if (modelElement)
             gitElements.push(modelElement);
     }
-    // [OMC] label
+    // [OMC#X.Y.Z] label with optional update notification
     if (enabledElements.omcLabel) {
-        elements.push(bold('[OMC]'));
+        const versionTag = context.omcVersion ? `#${context.omcVersion}` : '';
+        if (context.updateAvailable) {
+            elements.push(bold(`[OMC${versionTag}] -> ${context.updateAvailable} omc update`));
+        }
+        else {
+            elements.push(bold(`[OMC${versionTag}]`));
+        }
     }
     // Rate limits (5h and weekly)
     if (enabledElements.rateLimits && context.rateLimits) {
