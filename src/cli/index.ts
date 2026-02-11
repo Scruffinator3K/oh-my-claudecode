@@ -1152,12 +1152,14 @@ program
   .option('-f, --force', 'Force reinstall even if already up to date')
   .option('-q, --quiet', 'Suppress output except for errors')
   .option('--skip-hooks', 'Skip hook installation')
+  .option('--force-hooks', 'Force reinstall hooks even if unchanged')
   .addHelpText('after', `
 Examples:
   $ omc setup                     Sync all OMC components
   $ omc setup --force             Force reinstall everything
   $ omc setup --quiet             Silent setup for scripts
-  $ omc setup --skip-hooks        Install without hooks`)
+  $ omc setup --skip-hooks        Install without hooks
+  $ omc setup --force-hooks       Force reinstall hooks`)
   .action(async (options) => {
     if (!options.quiet) {
       console.log(chalk.blue('Oh-My-ClaudeCode Setup\n'));
@@ -1169,10 +1171,10 @@ Examples:
     }
 
     const result = installSisyphus({
-      force: options.force ?? true, // Default to force for setup
+      force: !!options.force,
       verbose: !options.quiet,
       skipClaudeCheck: true,
-      forceHooks: !options.skipHooks,
+      forceHooks: !!options.forceHooks,
     });
 
     if (!result.success) {
