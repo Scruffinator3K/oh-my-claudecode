@@ -126,32 +126,39 @@ function appendToBashHistory(command) {
 }
 
 // Detect failures in Bash output
+// Only checks structured exit-code indicators and line-anchored error patterns
+// to avoid false positives from matching words inside command stdout/stderr content.
 function detectBashFailure(output) {
-  const errorPatterns = [
-    /error:/i,
-    /failed/i,
-    /cannot/i,
-    /permission denied/i,
-    /command not found/i,
-    /no such file/i,
-    /exit code: [1-9]/i,
-    /exit status [1-9]/i,
-    /fatal:/i,
-    /abort/i,
+  // 1. Structured exit-code check (most reliable signal)
+  if (/exit code: [1-9]\d*/i.test(output)) return true;
+  if (/exit status [1-9]\d*/i.test(output)) return true;
+  if (/exited with code [1-9]\d*/i.test(output)) return true;
+
+  // 2. Line-anchored shell/system error patterns
+  //    These patterns require the error text at the start of a line (after optional
+  //    whitespace) so they won't match words embedded in normal command output.
+  const lineAnchoredPatterns = [
+    /^bash: .+: command not found$/m,
+    /^.*: command not found$/m,
+    /^.*: Permission denied$/m,
+    /^.*: No such file or directory$/m,
+    /^fatal: /m,
+    /^error: /mi,
   ];
 
-  return errorPatterns.some(pattern => pattern.test(output));
+  return lineAnchoredPatterns.some(pattern => pattern.test(output));
 }
 
 // Detect background operation
+// Uses structured patterns to avoid false positives from content containing
+// common words like "started", "running", or "async".
 function detectBackgroundOperation(output) {
   const bgPatterns = [
-    /started/i,
-    /running/i,
-    /background/i,
-    /async/i,
     /task_id/i,
-    /spawned/i,
+    /Background task launched/i,
+    /Background task resumed/i,
+    /run_in_background/i,
+    /"spawned"/i,
   ];
 
   return bgPatterns.some(pattern => pattern.test(output));
@@ -195,17 +202,27 @@ function processRememberTags(output, directory) {
   }
 }
 
-// Detect write failure
+// Detect write failure in Edit/Write tool responses
+// Uses line-anchored patterns to avoid false positives from file content that
+// happens to contain common words like "error" or "failed".
 function detectWriteFailure(output) {
-  const errorPatterns = [
-    /error/i,
-    /failed/i,
-    /permission denied/i,
-    /read-only/i,
-    /not found/i,
+  const patterns = [
+    // Claude Code Edit/Write specific error responses
+    /^Error: /m,
+    /ENOENT:/,
+    /EACCES:/,
+    /EPERM:/,
+    /EISDIR:/,
+    /EROFS:/,
+    /Permission denied$/m,
+    /read-only file system/i,
+    // Edit tool: old_string not found
+    /could not find/i,
+    /old_string.*not found/i,
+    /no match found/i,
   ];
 
-  return errorPatterns.some(pattern => pattern.test(output));
+  return patterns.some(pattern => pattern.test(output));
 }
 
 // Get agent completion summary from tracking state
@@ -387,4 +404,10 @@ async function main() {
   }
 }
 
-main();
+// Export for testing
+export { detectBashFailure, detectWriteFailure, detectBackgroundOperation, generateMessage };
+
+// Only run main when executed directly (not when imported by tests)
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+  main();
+}
