@@ -24,7 +24,8 @@ Automatically detects which mode is active and cancels it:
 - **Swarm**: Stops coordinated agent swarm, releases claimed tasks
 - **Ultrapilot**: Stops parallel autopilot workers
 - **Pipeline**: Stops sequential agent pipeline
-- **Team**: Sends shutdown_request to all teammates, waits for responses, calls TeamDelete
+- **Team**: Sends shutdown_request to all teammates, waits for responses, calls TeamDelete, clears linked ralph if present
+- **Team+Ralph (linked)**: Cancels team first (graceful shutdown), then clears ralph state. Cancelling ralph when linked also cancels team first.
 
 ## Usage
 
@@ -167,8 +168,11 @@ After graceful pass:
 **TeamDelete + Cleanup:**
 ```
   1. Call TeamDelete() — removes ~/.claude/teams/{name}/ and ~/.claude/tasks/{name}/
-  2. Remove local state: rm -f .omc/state/team-state.json
-  3. Emit structured cancel report
+  2. Clear team state: state_clear(mode="team")
+  3. Check for linked ralph: state_read(mode="ralph") — if linked_team is true:
+     a. Clear ralph state: state_clear(mode="ralph")
+     b. Clear linked ultrawork if present: state_clear(mode="ultrawork")
+  4. Emit structured cancel report
 ```
 
 **Structured Cancel Report:**

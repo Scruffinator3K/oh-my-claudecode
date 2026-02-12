@@ -6,10 +6,10 @@
  * Cross-platform: Windows, macOS, Linux
  */
 
-import { existsSync, readFileSync, writeFileSync, mkdirSync, appendFileSync } from 'fs';
+import { existsSync, readFileSync, writeFileSync, mkdirSync, appendFileSync, renameSync, unlinkSync } from 'fs';
 import { join, dirname } from 'path';
 import { homedir } from 'os';
-import { fileURLToPath } from 'url';
+import { fileURLToPath, pathToFileURL } from 'url';
 import { readStdin } from './lib/stdin.mjs';
 
 // Get the directory of this script to resolve the dist module
@@ -21,19 +21,25 @@ const distDir = join(__dirname, '..', 'dist', 'hooks', 'notepad');
 let setPriorityContext = null;
 let addWorkingMemoryEntry = null;
 try {
-  const notepadModule = await import(join(distDir, 'index.js'));
+  const notepadModule = await import(pathToFileURL(join(distDir, 'index.js')).href);
   setPriorityContext = notepadModule.setPriorityContext;
   addWorkingMemoryEntry = notepadModule.addWorkingMemoryEntry;
 } catch {
   // Notepad module not available - remember tags will be silently ignored
 }
 
+// Debug logging helper - gated behind OMC_DEBUG env var
+const debugLog = (...args) => {
+  if (process.env.OMC_DEBUG) console.error('[omc:debug:post-tool-verifier]', ...args);
+};
+
 // State file for session tracking
-const STATE_FILE = join(homedir(), '.claude', '.session-stats.json');
+const cfgDir = process.env.CLAUDE_CONFIG_DIR || join(homedir(), '.claude');
+const STATE_FILE = join(cfgDir, '.session-stats.json');
 
 // Ensure state directory exists
 try {
-  const stateDir = join(homedir(), '.claude');
+  const stateDir = cfgDir;
   if (!existsSync(stateDir)) {
     mkdirSync(stateDir, { recursive: true });
   }
@@ -45,15 +51,22 @@ function loadStats() {
     if (existsSync(STATE_FILE)) {
       return JSON.parse(readFileSync(STATE_FILE, 'utf-8'));
     }
-  } catch {}
+  } catch (e) {
+    debugLog('Failed to load stats:', e.message);
+  }
   return { sessions: {} };
 }
 
 // Save session statistics
 function saveStats(stats) {
+  const tmpFile = `${STATE_FILE}.tmp.${process.pid}.${Date.now()}.${Math.random().toString(36).slice(2)}`;
   try {
-    writeFileSync(STATE_FILE, JSON.stringify(stats, null, 2));
-  } catch {}
+    writeFileSync(tmpFile, JSON.stringify(stats, null, 2));
+    renameSync(tmpFile, STATE_FILE);
+  } catch (e) {
+    debugLog('Failed to save stats:', e.message);
+    try { unlinkSync(tmpFile); } catch {}
+  }
 }
 
 // Update stats for this session
@@ -82,7 +95,7 @@ function updateStats(toolName, sessionId) {
 // Read bash history config (default: enabled)
 function getBashHistoryConfig() {
   try {
-    const configPath = join(homedir(), '.claude', '.omc-config.json');
+    const configPath = join(cfgDir, '.omc-config.json');
     if (existsSync(configPath)) {
       const config = JSON.parse(readFileSync(configPath, 'utf-8'));
       if (config.bashHistory === false) return false;
@@ -92,8 +105,9 @@ function getBashHistoryConfig() {
   return true; // Default: enabled
 }
 
-// Append command to ~/.bash_history
+// Append command to ~/.bash_history (Unix only - no bash_history on Windows)
 function appendToBashHistory(command) {
+  if (process.platform === 'win32') return;
   if (!command || typeof command !== 'string') return;
 
   // Clean command: trim, skip empty, skip if it's just whitespace
@@ -329,6 +343,29 @@ async function main() {
       processRememberTags(toolOutput, directory);
     }
 
+    // Send notification when AskUserQuestion is used (user input needed)
+    if (toolName === 'AskUserQuestion') {
+      try {
+        const pluginRoot = process.env.CLAUDE_PLUGIN_ROOT;
+        if (pluginRoot) {
+          const { notify } = await import(pathToFileURL(join(pluginRoot, 'dist', 'notifications', 'index.js')).href);
+
+          const toolInput = data.tool_input || data.toolInput || {};
+          const questions = toolInput.questions || [];
+          const questionText = questions.map(q => q.question || '').filter(Boolean).join('; ') || 'User input requested';
+
+          // Fire and forget
+          notify('ask-user-question', {
+            sessionId,
+            projectPath: directory,
+            question: questionText,
+          }).catch(() => {});
+        }
+      } catch {
+        // Notification not available, skip
+      }
+    }
+
     // Generate contextual message
     const message = generateMessage(toolName, toolOutput, sessionId, toolCount, directory);
 
@@ -346,7 +383,7 @@ async function main() {
     console.log(JSON.stringify(response, null, 2));
   } catch (error) {
     // On error, always continue
-    console.log(JSON.stringify({ continue: true }));
+    console.log(JSON.stringify({ continue: true, suppressOutput: true }));
   }
 }
 

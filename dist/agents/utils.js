@@ -9,30 +9,96 @@
 import { readFileSync } from 'fs';
 import { join, dirname, resolve, relative, isAbsolute } from 'path';
 import { fileURLToPath } from 'url';
-// ============================================================
-// DYNAMIC PROMPT LOADING
-// ============================================================
 /**
- * Get the package root directory (where agents/ folder lives)
+ * Get the package root directory (where agents/ folder lives).
+ * Handles both ESM (import.meta.url) and CJS bundle (__dirname) contexts.
+ * When esbuild bundles to CJS, import.meta is replaced with {} so we
+ * fall back to __dirname which is natively available in CJS.
  */
 function getPackageDir() {
-    const __filename = fileURLToPath(import.meta.url);
-    const __dirname = dirname(__filename);
-    // From src/agents/ go up to package root
-    return join(__dirname, '..', '..');
+    try {
+        if (import.meta?.url) {
+            const __filename = fileURLToPath(import.meta.url);
+            const __dirname = dirname(__filename);
+            // From src/agents/ or dist/agents/ go up to package root
+            return join(__dirname, '..', '..');
+        }
+    }
+    catch {
+        // import.meta.url unavailable — fall through to CJS path
+    }
+    // CJS bundle path: from bridge/ go up 1 level to package root
+    // eslint-disable-next-line no-undef
+    if (typeof __dirname !== 'undefined') {
+        return join(__dirname, '..');
+    }
+    return process.cwd();
+}
+/**
+ * Strip YAML frontmatter from markdown content.
+ */
+function stripFrontmatter(content) {
+    const match = content.match(/^---[\s\S]*?---\s*([\s\S]*)$/);
+    return match ? match[1].trim() : content.trim();
 }
 /**
  * Load an agent prompt from /agents/{agentName}.md
- * Strips YAML frontmatter and returns the content
+ * Uses build-time embedded prompts when available (CJS bundles),
+ * falls back to runtime file reads (dev/test environments).
+ *
+ * When a provider is specified, tries provider-specific prompts first
+ * (e.g. agents.codex/{agentName}.md), then falls back to the default prompt.
  *
  * Security: Validates agent name to prevent path traversal attacks
  */
-export function loadAgentPrompt(agentName) {
+export function loadAgentPrompt(agentName, provider) {
     // Security: Validate agent name contains only safe characters (alphanumeric and hyphens)
     // This prevents path traversal attacks like "../../etc/passwd"
     if (!/^[a-z0-9-]+$/i.test(agentName)) {
         throw new Error(`Invalid agent name: contains disallowed characters`);
     }
+    // Try provider-specific prompt first
+    if (provider) {
+        // Build-time path (CJS bundle)
+        try {
+            if (provider === 'codex' && typeof __AGENT_PROMPTS_CODEX__ !== 'undefined' && __AGENT_PROMPTS_CODEX__ !== null) {
+                const prompt = __AGENT_PROMPTS_CODEX__[agentName];
+                if (prompt)
+                    return prompt;
+            }
+        }
+        catch {
+            // __AGENT_PROMPTS_CODEX__ not defined — fall through to runtime file read
+        }
+        // Runtime path (dev/test environments)
+        try {
+            const providerDir = join(getPackageDir(), `agents.${provider}`);
+            const providerPath = join(providerDir, `${agentName}.md`);
+            // Security: Verify resolved path is within the provider directory
+            const resolvedPath = resolve(providerPath);
+            const resolvedProviderDir = resolve(providerDir);
+            const rel = relative(resolvedProviderDir, resolvedPath);
+            if (!rel.startsWith('..') && !isAbsolute(rel)) {
+                const content = readFileSync(providerPath, 'utf-8');
+                return stripFrontmatter(content);
+            }
+        }
+        catch {
+            // provider-specific not found, fall through to default
+        }
+    }
+    // Prefer build-time embedded prompts (always available in CJS bundles)
+    try {
+        if (typeof __AGENT_PROMPTS__ !== 'undefined' && __AGENT_PROMPTS__ !== null) {
+            const prompt = __AGENT_PROMPTS__[agentName];
+            if (prompt)
+                return prompt;
+        }
+    }
+    catch {
+        // __AGENT_PROMPTS__ not defined — fall through to runtime file read
+    }
+    // Runtime fallback: read from filesystem (dev/test environments)
     try {
         const agentsDir = join(getPackageDir(), 'agents');
         const agentPath = join(agentsDir, `${agentName}.md`);
@@ -44,9 +110,7 @@ export function loadAgentPrompt(agentName) {
             throw new Error(`Invalid agent name: path traversal detected`);
         }
         const content = readFileSync(agentPath, 'utf-8');
-        // Extract content after YAML frontmatter (---\n...\n---\n)
-        const match = content.match(/^---[\s\S]*?---\s*([\s\S]*)$/);
-        return match ? match[1].trim() : content.trim();
+        return stripFrontmatter(content);
     }
     catch (error) {
         // Don't leak internal paths in error messages
@@ -221,6 +285,26 @@ export function parseDisallowedTools(agentName) {
     catch {
         return undefined;
     }
+}
+/**
+ * Standard path for open questions file
+ */
+export const OPEN_QUESTIONS_PATH = '.omc/plans/open-questions.md';
+/**
+ * Format open questions for appending to the standard open-questions.md file.
+ *
+ * @param topic - The plan or analysis topic name
+ * @param questions - Array of { question, reason } objects
+ * @returns Formatted markdown string ready to append
+ */
+export function formatOpenQuestions(topic, questions) {
+    if (questions.length === 0)
+        return '';
+    const date = new Date().toISOString().split('T')[0];
+    const items = questions
+        .map(q => `- [ ] ${q.question} — ${q.reason}`)
+        .join('\n');
+    return `\n## ${topic} - ${date}\n${items}\n`;
 }
 /**
  * Deep merge utility for configurations

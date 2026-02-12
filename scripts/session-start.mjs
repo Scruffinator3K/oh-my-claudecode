@@ -9,15 +9,18 @@
 import { existsSync, readFileSync, readdirSync, rmSync, mkdirSync, writeFileSync } from 'fs';
 import { join, dirname } from 'path';
 import { homedir } from 'os';
-import { fileURLToPath } from 'url';
+import { fileURLToPath, pathToFileURL } from 'url';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 
-// Import timeout-protected stdin reader (prevents hangs on Linux, see issue #240)
+/** Claude config directory (respects CLAUDE_CONFIG_DIR env var) */
+const configDir = process.env.CLAUDE_CONFIG_DIR || join(homedir(), '.claude');
+
+// Import timeout-protected stdin reader (prevents hangs on Linux/Windows, see issue #240, #524)
 let readStdin;
 try {
-  const mod = await import(join(__dirname, 'lib', 'stdin.mjs'));
+  const mod = await import(pathToFileURL(join(__dirname, 'lib', 'stdin.mjs')).href);
   readStdin = mod.readStdin;
 } catch {
   // Fallback: inline timeout-protected readStdin if lib module is missing
@@ -75,7 +78,7 @@ function getPluginVersion() {
 // Get npm global package version
 function getNpmVersion() {
   try {
-    const versionFile = join(homedir(), '.claude', '.omc-version.json');
+    const versionFile = join(configDir, '.omc-version.json');
     const data = readJsonFile(versionFile);
     return data?.version || null;
   } catch { return null; }
@@ -84,7 +87,7 @@ function getNpmVersion() {
 // Get CLAUDE.md version
 function getClaudeMdVersion() {
   try {
-    const claudeMdPath = join(homedir(), '.claude', 'CLAUDE.md');
+    const claudeMdPath = join(configDir, 'CLAUDE.md');
     if (!existsSync(claudeMdPath)) return null;  // File doesn't exist
     const content = readFileSync(claudeMdPath, 'utf-8');
     const version = extractOmcVersion(content);
@@ -128,7 +131,7 @@ function detectVersionDrift() {
 
 // Check if we should notify (once per unique drift combination)
 function shouldNotifyDrift(driftInfo) {
-  const stateFile = join(homedir(), '.claude', '.omc', 'update-state.json');
+  const stateFile = join(configDir, '.omc', 'update-state.json');
   const driftKey = `plugin:${driftInfo.pluginVersion}-npm:${driftInfo.npmVersion}-claude:${driftInfo.claudeMdVersion}`;
 
   try {
@@ -140,7 +143,7 @@ function shouldNotifyDrift(driftInfo) {
 
   // Save new drift state
   try {
-    const dir = join(homedir(), '.claude', '.omc');
+    const dir = join(configDir, '.omc');
     if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
     writeFileSync(stateFile, JSON.stringify({
       lastNotifiedDrift: driftKey,
@@ -153,7 +156,7 @@ function shouldNotifyDrift(driftInfo) {
 
 // Check npm registry for available update (with 24h cache)
 async function checkNpmUpdate(currentVersion) {
-  const cacheFile = join(homedir(), '.claude', '.omc', 'update-check.json');
+  const cacheFile = join(configDir, '.omc', 'update-check.json');
   const CACHE_DURATION = 24 * 60 * 60 * 1000;
   const now = Date.now();
 
@@ -185,7 +188,7 @@ async function checkNpmUpdate(currentVersion) {
 
     // Update cache
     try {
-      const dir = join(homedir(), '.claude', '.omc');
+      const dir = join(configDir, '.omc');
       if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
       writeFileSync(cacheFile, JSON.stringify({ timestamp: now, latestVersion, currentVersion, updateAvailable }));
     } catch {}
@@ -196,11 +199,11 @@ async function checkNpmUpdate(currentVersion) {
 
 // Check if HUD is properly installed (with retry for race conditions)
 async function checkHudInstallation(retryCount = 0) {
-  const hudDir = join(homedir(), '.claude', 'hud');
+  const hudDir = join(configDir, 'hud');
   // Support both legacy (sisyphus-hud.mjs) and current (omc-hud.mjs) naming
   const hudScriptOmc = join(hudDir, 'omc-hud.mjs');
   const hudScriptSisyphus = join(hudDir, 'sisyphus-hud.mjs');
-  const settingsFile = join(homedir(), '.claude', 'settings.json');
+  const settingsFile = join(configDir, 'settings.json');
 
   const MAX_RETRIES = 2;
   const RETRY_DELAY_MS = 100;
@@ -413,7 +416,7 @@ ${cleanContent}
 
     // Cleanup old plugin cache versions (keep latest 2)
     try {
-      const cacheBase = join(homedir(), '.claude', 'plugins', 'cache', 'omc', 'oh-my-claudecode');
+      const cacheBase = join(configDir, 'plugins', 'cache', 'omc', 'oh-my-claudecode');
       if (existsSync(cacheBase)) {
         const versions = readdirSync(cacheBase)
           .filter(v => /^\d+\.\d+\.\d+/.test(v))
@@ -428,6 +431,22 @@ ${cleanContent}
       }
     } catch {}
 
+    // Send session-start notification (non-blocking, fire-and-forget)
+    try {
+      const pluginRoot = process.env.CLAUDE_PLUGIN_ROOT;
+      if (pluginRoot) {
+        const { notify } = await import(pathToFileURL(join(pluginRoot, 'dist', 'notifications', 'index.js')).href);
+        // Fire and forget - don't await, don't block session start
+        notify('session-start', {
+          sessionId,
+          projectPath: directory,
+          timestamp: new Date().toISOString(),
+        }).catch(() => {}); // swallow errors silently
+      }
+    } catch {
+      // Notification module not available, skip silently
+    }
+
     if (messages.length > 0) {
       console.log(JSON.stringify({
         continue: true,
@@ -437,10 +456,10 @@ ${cleanContent}
         }
       }));
     } else {
-      console.log(JSON.stringify({ continue: true }));
+      console.log(JSON.stringify({ continue: true, suppressOutput: true }));
     }
   } catch (error) {
-    console.log(JSON.stringify({ continue: true }));
+    console.log(JSON.stringify({ continue: true, suppressOutput: true }));
   }
 }
 

@@ -1,4 +1,4 @@
-[English](README.md) | [한국어](README.ko.md) | 中文 | [日本語](README.ja.md) | [Español](README.es.md)
+[English](README.md) | [한국어](README.ko.md) | 中文 | [日本語](README.ja.md) | [Español](README.es.md) | [Tiếng Việt](README.vi.md) | [Português](README.pt.md)
 
 # oh-my-claudecode
 
@@ -136,6 +136,57 @@ omc wait --stop   # 禁用守护进程
 ```
 
 **需要：** tmux（用于会话检测）
+
+### 通知标签配置 (Telegram/Discord)
+
+你可以配置 stop 回调发送会话摘要时要 @ 谁。
+
+```bash
+# 设置/替换标签列表
+omc config-stop-callback telegram --enable --token <bot_token> --chat <chat_id> --tag-list "@alice,bob"
+omc config-stop-callback discord --enable --webhook <url> --tag-list "@here,123456789012345678,role:987654321098765432"
+
+# 增量更新
+omc config-stop-callback telegram --add-tag charlie
+omc config-stop-callback discord --remove-tag @here
+omc config-stop-callback discord --clear-tags
+```
+
+标签规则：
+- Telegram：`alice` 会规范化为 `@alice`
+- Discord：支持 `@here`、`@everyone`、纯数字用户 ID、`role:<id>`
+- `file` 回调会忽略标签选项
+
+---
+
+## 通知 (Notifications)
+
+你可以为会话生命周期事件接收实时通知。
+
+支持的事件：
+- `session-start`
+- `session-stop`（当 persistent 模式进入等待/阻塞状态时）
+- `session-end`
+- `ask-user-question`
+
+### 配置
+在 Shell 配置文件（例如 `~/.zshrc`, `~/.bashrc`）中添加以下环境变量：
+
+```bash
+# Discord Bot
+export OMC_DISCORD_NOTIFIER_BOT_TOKEN="your_bot_token"
+export OMC_DISCORD_NOTIFIER_CHANNEL="your_channel_id"
+
+# Telegram
+export OMC_TELEGRAM_BOT_TOKEN="your_bot_token"
+export OMC_TELEGRAM_CHAT_ID="your_chat_id"
+
+# 可选 webhook
+export OMC_DISCORD_WEBHOOK_URL="your_webhook_url"
+export OMC_SLACK_WEBHOOK_URL="your_webhook_url"
+```
+
+> 注意：请确保在运行 `claude` 的同一个 Shell 中已加载这些环境变量。
 
 ---
 

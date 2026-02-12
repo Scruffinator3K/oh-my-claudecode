@@ -477,6 +477,16 @@ export async function runBridge(config: BridgeConfig): Promise<void> {
   log(`[bridge] ${workerName}@${teamName} starting (${provider})`);
   audit(config, 'bridge_start');
 
+  // Write initial heartbeat (protected so startup I/O failure doesn't prevent loop entry)
+  try {
+    writeHeartbeat(workingDirectory, buildHeartbeat(config, 'polling', null, 0));
+  } catch (err) {
+    audit(config, 'bridge_start', undefined, { warning: 'startup_write_failed', error: String(err) });
+  }
+
+  // Ready emission is deferred until first successful poll cycle
+  let readyEmitted = false;
+
   while (true) {
     try {
       // --- 1. Check shutdown signal ---
@@ -529,6 +539,27 @@ export async function runBridge(config: BridgeConfig): Promise<void> {
 
       // --- 3. Write heartbeat ---
       writeHeartbeat(workingDirectory, buildHeartbeat(config, 'polling', null, consecutiveErrors));
+
+      // Emit ready after first successful heartbeat write in poll loop
+      if (!readyEmitted) {
+        try {
+          // Write ready heartbeat so status-based monitoring detects the transition
+          writeHeartbeat(workingDirectory, buildHeartbeat(config, 'ready', null, 0));
+
+          appendOutbox(teamName, workerName, {
+            type: 'ready',
+            message: `Worker ${workerName} is ready (${provider})`,
+            timestamp: new Date().toISOString(),
+          });
+
+          // Emit worker_ready audit event for activity-log / hook consumers
+          audit(config, 'worker_ready');
+
+          readyEmitted = true;
+        } catch (err) {
+          audit(config, 'bridge_start', undefined, { warning: 'startup_write_failed', error: String(err) });
+        }
+      }
 
       // --- 4. Read inbox ---
       const messages = readNewInboxMessages(teamName, workerName);

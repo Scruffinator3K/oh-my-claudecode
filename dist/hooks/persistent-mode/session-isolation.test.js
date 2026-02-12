@@ -9,6 +9,7 @@ describe("Persistent Mode Session Isolation (Issue #311)", () => {
     let tempDir;
     beforeEach(() => {
         tempDir = mkdtempSync(join(tmpdir(), "persistent-mode-test-"));
+        execSync('git init', { cwd: tempDir });
     });
     afterEach(() => {
         rmSync(tempDir, { recursive: true, force: true });

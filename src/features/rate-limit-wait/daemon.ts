@@ -12,11 +12,11 @@
  * Reference: https://github.com/EvanOman/cc-wait
  */
 
-import { existsSync, mkdirSync, readFileSync, writeFileSync, unlinkSync, chmodSync, statSync } from 'fs';
+import { existsSync, mkdirSync, readFileSync, writeFileSync, unlinkSync, chmodSync, statSync, appendFileSync, renameSync } from 'fs';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
-import { homedir, tmpdir } from 'os';
-import { spawn, spawnSync } from 'child_process';
+import { homedir } from 'os';
+import { spawn } from 'child_process';
 import { checkRateLimitStatus, formatRateLimitStatus, formatTimeUntilReset } from './rate-limit-monitor.js';
 import {
   isTmuxAvailable,
@@ -136,7 +136,6 @@ function rotateLogIfNeeded(logPath: string): void {
         unlinkSync(backupPath);
       }
       // Rename current to backup
-      const { renameSync } = require('fs');
       renameSync(logPath, backupPath);
     }
   } catch {
@@ -277,7 +276,6 @@ function log(message: string, config: Required<DaemonConfig>): void {
     const logLine = `[${timestamp}] ${message}\n`;
 
     // Append to log file with secure permissions
-    const { appendFileSync } = require('fs');
     appendFileSync(config.logFilePath, logLine, { mode: SECURE_FILE_MODE });
   } catch {
     // Ignore log write errors
@@ -422,25 +420,20 @@ export function startDaemon(config?: DaemonConfig): DaemonResponse {
 
   ensureStateDir(cfg);
 
-  // Fork a new process for the daemon
-  // Write config to temp file instead of interpolating into script string
-  // This prevents code injection if config values contain JavaScript
-  const configTempPath = join(tmpdir(), `omc-daemon-cfg-${process.pid}-${Date.now()}.json`);
-  writeSecureFile(configTempPath, JSON.stringify(cfg));
-
-  const daemonScript = [
-    `const fs = require('fs');`,
-    `const cfgPath = process.argv[1];`,
-    `const config = JSON.parse(fs.readFileSync(cfgPath, 'utf-8'));`,
-    `try { fs.unlinkSync(cfgPath); } catch {}`,
-    `const { pollLoop } = require('${__filename.replace(/\.ts$/, '.js')}');`,
-    `pollLoop(config).catch(console.error);`,
-  ].join('\n');
+  // Fork a new process for the daemon using dynamic import() for ESM compatibility.
+  // The project uses "type": "module", so require() would fail with ERR_REQUIRE_ESM.
+  const modulePath = __filename.replace(/\.ts$/, '.js');
+  const daemonScript = `
+    import('${modulePath}').then(({ pollLoop }) => {
+      const config = ${JSON.stringify(cfg)};
+      return pollLoop(config);
+    }).catch((err) => { console.error(err); process.exit(1); });
+  `;
 
   try {
     // Use node to run the daemon in background
     // Note: Using minimal env to prevent leaking sensitive credentials
-    const child = spawn('node', ['-e', daemonScript, configTempPath], {
+    const child = spawn('node', ['-e', daemonScript], {
       detached: true,
       stdio: 'ignore',
       cwd: process.cwd(),

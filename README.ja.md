@@ -1,4 +1,4 @@
-[English](README.md) | [한국어](README.ko.md) | [中文](README.zh.md) | 日本語 | [Español](README.es.md)
+[English](README.md) | [한국어](README.ko.md) | [中文](README.zh.md) | 日本語 | [Español](README.es.md) | [Tiếng Việt](README.vi.md) | [Português](README.pt.md)
 
 # oh-my-claudecode
 
@@ -136,6 +136,57 @@ omc wait --stop   # デーモンを無効化
 ```
 
 **必要なもの:** tmux (セッション検出用)
+
+### 通知タグ設定 (Telegram/Discord)
+
+stop コールバックがセッション要約を送るときに、誰をタグ付けするか設定できます。
+
+```bash
+# タグ一覧を設定/置換
+omc config-stop-callback telegram --enable --token <bot_token> --chat <chat_id> --tag-list "@alice,bob"
+omc config-stop-callback discord --enable --webhook <url> --tag-list "@here,123456789012345678,role:987654321098765432"
+
+# 追加・削除・クリア
+omc config-stop-callback telegram --add-tag charlie
+omc config-stop-callback discord --remove-tag @here
+omc config-stop-callback discord --clear-tags
+```
+
+タグの挙動:
+- Telegram: `alice` は `@alice` に正規化
+- Discord: `@here`、`@everyone`、数値ユーザーID、`role:<id>` をサポート
+- `file` コールバックはタグオプションを無視
+
+---
+
+## 通知 (Notifications)
+
+セッションのライフサイクルイベントに対してリアルタイム通知を受け取れます。
+
+対象イベント:
+- `session-start`
+- `session-stop`（persistent モードが待機/ブロック状態に入ったとき）
+- `session-end`
+- `ask-user-question`
+
+### 設定
+シェルプロファイル（例: `~/.zshrc`, `~/.bashrc`）に環境変数を追加してください:
+
+```bash
+# Discord Bot
+export OMC_DISCORD_NOTIFIER_BOT_TOKEN="your_bot_token"
+export OMC_DISCORD_NOTIFIER_CHANNEL="your_channel_id"
+
+# Telegram
+export OMC_TELEGRAM_BOT_TOKEN="your_bot_token"
+export OMC_TELEGRAM_CHAT_ID="your_chat_id"
+
+# Optional webhooks
+export OMC_DISCORD_WEBHOOK_URL="your_webhook_url"
+export OMC_SLACK_WEBHOOK_URL="your_webhook_url"
+```
+
+> 注意: `claude` を実行する同じシェルで環境変数が読み込まれている必要があります。
 
 ---
 

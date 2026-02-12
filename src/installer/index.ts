@@ -20,9 +20,10 @@ import {
   MIN_NODE_VERSION
 } from './hooks.js';
 import { getRuntimePackageVersion } from '../lib/version.js';
+import { getConfigDir } from '../utils/config-dir.js';
 
 /** Claude Code configuration directory */
-export const CLAUDE_CONFIG_DIR = join(homedir(), '.claude');
+export const CLAUDE_CONFIG_DIR = getConfigDir();
 export const AGENTS_DIR = join(CLAUDE_CONFIG_DIR, 'agents');
 export const COMMANDS_DIR = join(CLAUDE_CONFIG_DIR, 'commands');
 export const SKILLS_DIR = join(CLAUDE_CONFIG_DIR, 'skills');
@@ -88,6 +89,26 @@ export interface InstallOptions {
   skipClaudeCheck?: boolean;
   forceHooks?: boolean;
   refreshHooksInPlugin?: boolean;
+  skipHud?: boolean;
+}
+
+/**
+ * Read hudEnabled from .omc-config.json without importing auto-update
+ * (avoids circular dependency since auto-update imports from installer)
+ */
+export function isHudEnabledInConfig(): boolean {
+  const configPath = join(CLAUDE_CONFIG_DIR, '.omc-config.json');
+  if (!existsSync(configPath)) {
+    return true; // default: enabled
+  }
+  try {
+    const content = readFileSync(configPath, 'utf-8');
+    const config = JSON.parse(content);
+    // Only disable if explicitly set to false
+    return config.hudEnabled !== false;
+  } catch {
+    return true; // default: enabled on parse error
+  }
 }
 
 /**
@@ -174,7 +195,7 @@ export function isProjectScopedPlugin(): boolean {
   }
 
   // Global plugins are installed under ~/.claude/plugins/
-  const globalPluginBase = join(homedir(), '.claude', 'plugins');
+  const globalPluginBase = join(CLAUDE_CONFIG_DIR, 'plugins');
 
   // If the plugin root is NOT under the global plugin directory, it's project-scoped
   // Normalize paths for comparison (resolve symlinks, trailing slashes, etc.)
@@ -185,14 +206,28 @@ export function isProjectScopedPlugin(): boolean {
 }
 
 /**
- * Get the package root directory
- * From dist/installer/index.js, go up to package root
+ * Get the package root directory.
+ * Works for both ESM (dist/installer/) and CJS bundles (bridge/).
+ * When esbuild bundles to CJS, import.meta is replaced with {} so we
+ * fall back to __dirname which is natively available in CJS.
  */
 function getPackageDir(): string {
-  const __filename = fileURLToPath(import.meta.url);
-  const __dirname = dirname(__filename);
-  // From dist/installer/index.js, go up to package root
-  return join(__dirname, '..', '..');
+  try {
+    if (import.meta?.url) {
+      const __filename = fileURLToPath(import.meta.url);
+      const __dirname = dirname(__filename);
+      // From dist/installer/index.js, go up to package root
+      return join(__dirname, '..', '..');
+    }
+  } catch {
+    // import.meta.url unavailable — fall through to CJS path
+  }
+  // CJS bundle path: from bridge/ go up 1 level to package root
+  // eslint-disable-next-line no-undef
+  if (typeof __dirname !== 'undefined') {
+    return join(__dirname, '..');
+  }
+  return process.cwd();
 }
 
 /**
@@ -523,15 +558,21 @@ export function install(options: InstallOptions = {}): InstallResult {
       log('Skipping agent/command/hook files (managed by plugin system)');
     }
 
-    // Install HUD statusline (skip for project-scoped plugins to avoid affecting global settings)
-    // Project-scoped plugins should not modify ~/.claude/settings.json
+    // Install HUD statusline (skip for project-scoped plugins, skipHud option, or hudEnabled config)
     let hudScriptPath: string | null = null;
+    const hudDisabledByOption = options.skipHud === true;
+    const hudDisabledByConfig = !isHudEnabledInConfig();
+    const skipHud = projectScoped || hudDisabledByOption || hudDisabledByConfig;
     if (projectScoped) {
       log('Skipping HUD statusline (project-scoped plugin should not modify global settings)');
+    } else if (hudDisabledByOption) {
+      log('Skipping HUD statusline (user opted out)');
+    } else if (hudDisabledByConfig) {
+      log('Skipping HUD statusline (hudEnabled is false in .omc-config.json)');
     } else {
       log('Installing HUD statusline...');
     }
-    if (!projectScoped) try {
+    if (!skipHud) try {
       if (!existsSync(HUD_DIR)) {
         mkdirSync(HUD_DIR, { recursive: true });
       }

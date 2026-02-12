@@ -135,6 +135,30 @@ This is a TypeScript monorepo using:
 - Tests alongside source files
 ```
 
+### Stop Callback Notification Tags
+
+Configure tags for Telegram/Discord stop callbacks with `omc config-stop-callback`.
+
+```bash
+# Set/replace tags
+omc config-stop-callback telegram --enable --token <bot_token> --chat <chat_id> --tag-list "@alice,bob"
+omc config-stop-callback discord --enable --webhook <url> --tag-list "@here,123456789012345678,role:987654321098765432"
+
+# Incremental updates
+omc config-stop-callback telegram --add-tag charlie
+omc config-stop-callback discord --remove-tag @here
+omc config-stop-callback discord --clear-tags
+
+# Inspect current callback config
+omc config-stop-callback telegram --show
+omc config-stop-callback discord --show
+```
+
+Tag behavior:
+- Telegram: `alice` is normalized to `@alice`
+- Discord: supports `@here`, `@everyone`, numeric user IDs (`<@id>`), and role tags (`role:<id>` -> `<@&id>`)
+- `file` callbacks ignore tag options
+
 ---
 
 ## Agents (28 Total)
@@ -433,6 +457,13 @@ By default, both files must reside within the `working_directory`:
 | `OMC_MCP_OUTPUT_REDIRECT_DIR` | Path (default: `.omc/outputs`) | Directory for redirected outputs when policy is `redirect_output` |
 | `OMC_MCP_ALLOW_EXTERNAL_PROMPT` | `0` (default), `1` | Allow prompt files outside working directory |
 | `OMC_ALLOW_EXTERNAL_WORKDIR` | unset (default), `1` | Allow working_directory outside project worktree |
+| `OMC_DISCORD_WEBHOOK_URL` | URL | Discord webhook URL for notifications |
+| `OMC_DISCORD_NOTIFIER_BOT_TOKEN` | Token | Discord bot token for Bot API notifications |
+| `OMC_DISCORD_NOTIFIER_CHANNEL` | Channel ID | Discord channel ID for Bot API notifications |
+| `OMC_DISCORD_MENTION` | `<@uid>` or `<@&role_id>` | Mention to prepend to Discord messages |
+| `OMC_TELEGRAM_BOT_TOKEN` | Token | Telegram bot token for notifications |
+| `OMC_TELEGRAM_CHAT_ID` | Chat ID | Telegram chat ID for notifications |
+| `OMC_SLACK_WEBHOOK_URL` | URL | Slack incoming webhook URL for notifications |
 
 ### Policy Descriptions
 

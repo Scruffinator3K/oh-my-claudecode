@@ -11,7 +11,7 @@
  *
  * Reference: https://github.com/EvanOman/cc-wait
  */
-import { existsSync, mkdirSync, readFileSync, writeFileSync, unlinkSync, chmodSync, statSync } from 'fs';
+import { existsSync, mkdirSync, readFileSync, writeFileSync, unlinkSync, chmodSync, statSync, appendFileSync, renameSync } from 'fs';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
 import { homedir } from 'os';
@@ -115,7 +115,6 @@ function rotateLogIfNeeded(logPath) {
                 unlinkSync(backupPath);
             }
             // Rename current to backup
-            const { renameSync } = require('fs');
             renameSync(logPath, backupPath);
         }
     }
@@ -243,7 +242,6 @@ function log(message, config) {
         const timestamp = new Date().toISOString();
         const logLine = `[${timestamp}] ${message}\n`;
         // Append to log file with secure permissions
-        const { appendFileSync } = require('fs');
         appendFileSync(config.logFilePath, logLine, { mode: SECURE_FILE_MODE });
     }
     catch {
@@ -365,11 +363,14 @@ export function startDaemon(config) {
         console.warn('[RateLimitDaemon] tmux not available - resume functionality will be limited');
     }
     ensureStateDir(cfg);
-    // Fork a new process for the daemon
+    // Fork a new process for the daemon using dynamic import() for ESM compatibility.
+    // The project uses "type": "module", so require() would fail with ERR_REQUIRE_ESM.
+    const modulePath = __filename.replace(/\.ts$/, '.js');
     const daemonScript = `
-    const { pollLoop } = require('${__filename.replace(/\.ts$/, '.js')}');
-    const config = ${JSON.stringify(cfg)};
-    pollLoop(config).catch(console.error);
+    import('${modulePath}').then(({ pollLoop }) => {
+      const config = ${JSON.stringify(cfg)};
+      return pollLoop(config);
+    }).catch((err) => { console.error(err); process.exit(1); });
   `;
     try {
         // Use node to run the daemon in background

@@ -15,6 +15,7 @@
 import { pathToFileURL } from 'url';
 import { existsSync, readFileSync } from "fs";
 import { join } from "path";
+import { resolveToWorktreeRoot } from "../lib/worktree-paths.js";
 // Hot-path imports: needed on every/most hook invocations (keyword-detector, pre/post-tool-use)
 import { removeCodeBlocks, getAllKeywords } from "./keyword-detector/index.js";
 import { processOrchestratorPreTool, processOrchestratorPostTool } from "./omc-orchestrator/index.js";
@@ -166,7 +167,7 @@ async function processKeywordDetector(input) {
         return { continue: true };
     }
     const sessionId = input.sessionId;
-    const directory = input.directory || process.cwd();
+    const directory = resolveToWorktreeRoot(input.directory);
     const messages = [];
     // Process each keyword and collect messages
     for (const keywordType of keywords) {
@@ -239,7 +240,7 @@ async function processStopContinuation(_input) {
  */
 async function processRalph(input) {
     const sessionId = input.sessionId;
-    const directory = input.directory || process.cwd();
+    const directory = resolveToWorktreeRoot(input.directory);
     if (!sessionId) {
         return { continue: true };
     }
@@ -303,7 +304,7 @@ ${newState.prompt}`;
  */
 async function processPersistentMode(input) {
     const sessionId = input.sessionId;
-    const directory = input.directory || process.cwd();
+    const directory = resolveToWorktreeRoot(input.directory);
     // Lazy-load persistent-mode and todo-continuation modules
     const { checkPersistentModes, createHookOutput } = await import("./persistent-mode/index.js");
     // Extract stop context for abort detection (supports both camelCase and snake_case)
@@ -317,6 +318,18 @@ async function processPersistentMode(input) {
     const output = createHookOutput(result);
     const teamState = readTeamStagedState(directory, sessionId);
     if (!teamState || teamState.active !== true || isTeamStateTerminal(teamState)) {
+        // No persistent mode and no active team — Claude is truly idle.
+        // Send session-idle notification (non-blocking) unless this was a user abort or context limit.
+        if (result.mode === "none" && sessionId) {
+            const isAbort = stopContext.user_requested === true || stopContext.userRequested === true;
+            const isContextLimit = stopContext.stop_reason === "context_limit" || stopContext.stopReason === "context_limit";
+            if (!isAbort && !isContextLimit) {
+                import("../notifications/index.js").then(({ notify }) => notify("session-idle", {
+                    sessionId,
+                    projectPath: directory,
+                }).catch(() => { })).catch(() => { });
+            }
+        }
         return output;
     }
     const stage = getTeamStage(teamState);
@@ -348,7 +361,7 @@ When team verification passes or cancel is requested, allow terminal cleanup beh
  */
 async function processSessionStart(input) {
     const sessionId = input.sessionId;
-    const directory = input.directory || process.cwd();
+    const directory = resolveToWorktreeRoot(input.directory);
     // Lazy-load session-start dependencies
     const { initSilentAutoUpdate } = await import("../features/auto-update.js");
     const { readAutopilotState } = await import("./autopilot/index.js");
@@ -356,6 +369,13 @@ async function processSessionStart(input) {
     const { checkIncompleteTodos } = await import("./todo-continuation/index.js");
     // Trigger silent auto-update check (non-blocking, checks config internally)
     initSilentAutoUpdate();
+    // Send session-start notification (non-blocking, swallows errors)
+    if (sessionId) {
+        import("../notifications/index.js").then(({ notify }) => notify("session-start", {
+            sessionId,
+            projectPath: directory,
+        }).catch(() => { })).catch(() => { });
+    }
     const messages = [];
     // Check for active autopilot state - only restore if it belongs to this session
     const autopilotState = readAutopilotState(directory);
@@ -459,7 +479,7 @@ Please continue working on these tasks.
  * Checks delegation enforcement and tracks background tasks
  */
 function processPreToolUse(input) {
-    const directory = input.directory || process.cwd();
+    const directory = resolveToWorktreeRoot(input.directory);
     // Check delegation enforcement FIRST
     const enforcementResult = processOrchestratorPreTool({
         toolName: input.toolName || "",
@@ -548,7 +568,7 @@ function processPreToolUse(input) {
  * Process post-tool-use hook
  */
 function processPostToolUse(input) {
-    const directory = input.directory || process.cwd();
+    const directory = resolveToWorktreeRoot(input.directory);
     const messages = [];
     // Run orchestrator post-tool processing (remember tags, verification reminders, etc.)
     const orchestratorResult = processOrchestratorPostTool({
@@ -580,7 +600,7 @@ function processPostToolUse(input) {
  * Manages autopilot state and injects phase prompts
  */
 async function processAutopilot(input) {
-    const directory = input.directory || process.cwd();
+    const directory = resolveToWorktreeRoot(input.directory);
     // Lazy-load autopilot module
     const { readAutopilotState, getPhasePrompt } = await import("./autopilot/index.js");
     const state = readAutopilotState(directory, input.sessionId);

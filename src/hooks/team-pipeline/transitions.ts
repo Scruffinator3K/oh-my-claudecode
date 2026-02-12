@@ -1,6 +1,7 @@
 import type { TeamPipelinePhase, TeamPipelineState, TeamTransitionResult } from './types.js';
 import { markTeamPhase } from './state.js';
 
+
 const ALLOWED: Record<TeamPipelinePhase, TeamPipelinePhase[]> = {
   'team-plan': ['team-prd'],
   'team-prd': ['team-exec'],
@@ -85,6 +86,9 @@ export function transitionTeamPhase(
       reason: guardFailure,
     };
   }
+
+  // Ralph iteration is incremented in the persistent-mode stop-event handler,
+  // not here, to avoid double-counting when team-fix triggers a ralph continuation.
 
   return markTeamPhase(state, next, reason);
 }

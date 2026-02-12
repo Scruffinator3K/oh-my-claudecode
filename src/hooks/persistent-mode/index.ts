@@ -12,13 +12,14 @@
 
 import { existsSync, readFileSync, unlinkSync } from 'fs';
 import { join } from 'path';
-import { homedir } from 'os';
+import { getClaudeConfigDir } from '../../utils/paths.js';
 import {
   readUltraworkState,
   incrementReinforcement,
   deactivateUltrawork,
   getUltraworkPersistenceMessage
 } from '../ultrawork/index.js';
+import { resolveToWorktreeRoot } from '../../lib/worktree-paths.js';
 import {
   readRalphState,
   incrementRalphIteration,
@@ -39,6 +40,8 @@ import {
   isAutopilotActive
 } from '../autopilot/index.js';
 import { checkAutopilot } from '../autopilot/enforcement.js';
+import { readTeamPipelineState } from '../team-pipeline/state.js';
+import type { TeamPipelinePhase } from '../team-pipeline/types.js';
 
 export interface ToolErrorState {
   tool_name: string;
@@ -190,7 +193,7 @@ export function resetTodoContinuationAttempts(sessionId: string): void {
  * Check for architect approval in session transcript
  */
 function checkArchitectApprovalInTranscript(sessionId: string): boolean {
-  const claudeDir = join(homedir(), '.claude');
+  const claudeDir = getClaudeConfigDir();
   const possiblePaths = [
     join(claudeDir, 'sessions', sessionId, 'transcript.md'),
     join(claudeDir, 'sessions', sessionId, 'messages.json'),
@@ -216,7 +219,7 @@ function checkArchitectApprovalInTranscript(sessionId: string): boolean {
  * Check for architect rejection in session transcript
  */
 function checkArchitectRejectionInTranscript(sessionId: string): { rejected: boolean; feedback: string } {
-  const claudeDir = join(homedir(), '.claude');
+  const claudeDir = getClaudeConfigDir();
   const possiblePaths = [
     join(claudeDir, 'sessions', sessionId, 'transcript.md'),
     join(claudeDir, 'sessions', sessionId, 'messages.json'),
@@ -247,7 +250,7 @@ async function checkRalphLoop(
   sessionId?: string,
   directory?: string
 ): Promise<PersistentModeResult | null> {
-  const workingDir = directory || process.cwd();
+  const workingDir = resolveToWorktreeRoot(directory);
   const state = readRalphState(workingDir, sessionId);
 
   if (!state || !state.active) {
@@ -257,6 +260,45 @@ async function checkRalphLoop(
   // Strict session isolation: only process state for matching session
   if (state.session_id !== sessionId) {
     return null;
+  }
+
+  // Check team pipeline state coordination
+  // When team mode is active alongside ralph, respect team phase transitions
+  const teamState = readTeamPipelineState(workingDir, sessionId);
+  if (teamState && teamState.active !== undefined) {
+    const teamPhase: TeamPipelinePhase = teamState.phase;
+
+    // If team pipeline reached a terminal state, ralph should also complete
+    if (teamPhase === 'complete') {
+      clearRalphState(workingDir, sessionId);
+      clearVerificationState(workingDir, sessionId);
+      deactivateUltrawork(workingDir, sessionId);
+      return {
+        shouldBlock: false,
+        message: `[RALPH LOOP COMPLETE - TEAM] Team pipeline completed successfully. Ralph loop ending after ${state.iteration} iteration(s).`,
+        mode: 'none'
+      };
+    }
+    if (teamPhase === 'failed') {
+      clearRalphState(workingDir, sessionId);
+      clearVerificationState(workingDir, sessionId);
+      deactivateUltrawork(workingDir, sessionId);
+      return {
+        shouldBlock: false,
+        message: `[RALPH LOOP STOPPED - TEAM FAILED] Team pipeline failed. Ralph loop ending after ${state.iteration} iteration(s).`,
+        mode: 'none'
+      };
+    }
+    if (teamPhase === 'cancelled') {
+      clearRalphState(workingDir, sessionId);
+      clearVerificationState(workingDir, sessionId);
+      deactivateUltrawork(workingDir, sessionId);
+      return {
+        shouldBlock: false,
+        message: `[RALPH LOOP CANCELLED - TEAM] Team pipeline was cancelled. Ralph loop ending after ${state.iteration} iteration(s).`,
+        mode: 'none'
+      };
+    }
   }
 
   // Check for PRD-based completion (all stories have passes: true)
@@ -507,7 +549,7 @@ export async function checkPersistentModes(
   directory?: string,
   stopContext?: StopContext  // NEW: from todo-continuation types
 ): Promise<PersistentModeResult> {
-  const workingDir = directory || process.cwd();
+  const workingDir = resolveToWorktreeRoot(directory);
 
   // CRITICAL: Never block context-limit stops.
   // Blocking these causes a deadlock where Claude Code cannot compact.

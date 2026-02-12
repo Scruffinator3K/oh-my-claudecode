@@ -10,12 +10,13 @@
  * - Configurable update notifications
  */
 import { TaskTool } from '../hooks/beads-context/types.js';
+import type { NotificationConfig } from '../notifications/types.js';
 /** GitHub repository information */
 export declare const REPO_OWNER = "Yeachan-Heo";
 export declare const REPO_NAME = "oh-my-claudecode";
 export declare const GITHUB_API_URL = "https://api.github.com/repos/Yeachan-Heo/oh-my-claudecode";
 export declare const GITHUB_RAW_URL = "https://raw.githubusercontent.com/Yeachan-Heo/oh-my-claudecode";
-/** Installation paths */
+/** Installation paths (respects CLAUDE_CONFIG_DIR env var) */
 export declare const CLAUDE_CONFIG_DIR: string;
 export declare const VERSION_FILE: string;
 export declare const CONFIG_FILE: string;
@@ -38,6 +39,8 @@ export interface StopCallbackTelegramConfig {
     botToken?: string;
     /** Chat ID to send messages to */
     chatId?: string;
+    /** Optional tags/usernames to prefix in notifications */
+    tagList?: string[];
 }
 /**
  * Stop hook callback configuration for Discord
@@ -46,6 +49,8 @@ export interface StopCallbackDiscordConfig {
     enabled: boolean;
     /** Discord webhook URL */
     webhookUrl?: string;
+    /** Optional tags/user IDs/roles to prefix in notifications */
+    tagList?: string[];
 }
 /**
  * Stop hook callbacks configuration
@@ -58,7 +63,7 @@ export interface StopHookCallbacksConfig {
 /**
  * OMC configuration (stored in .omc-config.json)
  */
-export interface SisyphusConfig {
+export interface OMCConfig {
     /** Whether silent auto-updates are enabled (opt-in for security) */
     silentAutoUpdate: boolean;
     /** When the configuration was set */
@@ -85,13 +90,17 @@ export interface SisyphusConfig {
     setupCompleted?: string;
     /** Version of setup wizard that was completed */
     setupVersion?: string;
-    /** Stop hook callback configuration */
+    /** Stop hook callback configuration (legacy, use notifications instead) */
     stopHookCallbacks?: StopHookCallbacksConfig;
+    /** Multi-platform lifecycle notification configuration */
+    notifications?: NotificationConfig;
+    /** Whether HUD statusline is enabled (default: true). Set to false to skip HUD installation. */
+    hudEnabled?: boolean;
 }
 /**
- * Read the Sisyphus configuration
+ * Read the OMC configuration
  */
-export declare function getSisyphusConfig(): SisyphusConfig;
+export declare function getOMCConfig(): OMCConfig;
 /**
  * Check if silent auto-updates are enabled
  */
@@ -101,6 +110,12 @@ export declare function isSilentAutoUpdateEnabled(): boolean;
  * Returns true by default if not explicitly disabled
  */
 export declare function isEcomodeEnabled(): boolean;
+/**
+ * Check if team feature is enabled
+ * Returns false by default - requires explicit opt-in
+ * Checks ~/.claude/settings.json first, then env var fallback
+ */
+export declare function isTeamEnabled(): boolean;
 /**
  * Version metadata stored after installation
  */

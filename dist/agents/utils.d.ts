@@ -7,13 +7,18 @@
  * Ported from oh-my-opencode's agent utils.
  */
 import type { AgentConfig, AgentPromptMetadata, AvailableAgent, AgentOverrideConfig } from './types.js';
+import type { ExternalModelProvider } from '../shared/types.js';
 /**
  * Load an agent prompt from /agents/{agentName}.md
- * Strips YAML frontmatter and returns the content
+ * Uses build-time embedded prompts when available (CJS bundles),
+ * falls back to runtime file reads (dev/test environments).
+ *
+ * When a provider is specified, tries provider-specific prompts first
+ * (e.g. agents.codex/{agentName}.md), then falls back to the default prompt.
  *
  * Security: Validates agent name to prevent path traversal attacks
  */
-export declare function loadAgentPrompt(agentName: string): string;
+export declare function loadAgentPrompt(agentName: string, provider?: ExternalModelProvider): string;
 /**
  * Create tool restrictions configuration
  * Returns an object that can be spread into agent config to restrict tools
@@ -53,6 +58,21 @@ export declare function validateAgentConfig(config: AgentConfig): string[];
  * Parse disallowedTools from agent markdown frontmatter
  */
 export declare function parseDisallowedTools(agentName: string): string[] | undefined;
+/**
+ * Standard path for open questions file
+ */
+export declare const OPEN_QUESTIONS_PATH = ".omc/plans/open-questions.md";
+/**
+ * Format open questions for appending to the standard open-questions.md file.
+ *
+ * @param topic - The plan or analysis topic name
+ * @param questions - Array of { question, reason } objects
+ * @returns Formatted markdown string ready to append
+ */
+export declare function formatOpenQuestions(topic: string, questions: Array<{
+    question: string;
+    reason: string;
+}>): string;
 /**
  * Deep merge utility for configurations
  */

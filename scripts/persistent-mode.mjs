@@ -239,7 +239,8 @@ function countIncompleteTasks(sessionId) {
   if (!sessionId || typeof sessionId !== "string") return 0;
   if (!/^[a-zA-Z0-9][a-zA-Z0-9_-]{0,255}$/.test(sessionId)) return 0;
 
-  const taskDir = join(homedir(), ".claude", "tasks", sessionId);
+  const cfgDir = process.env.CLAUDE_CONFIG_DIR || join(homedir(), ".claude");
+  const taskDir = join(cfgDir, "tasks", sessionId);
   if (!existsSync(taskDir)) return 0;
 
   let count = 0;
@@ -396,13 +397,13 @@ async function main() {
     // Blocking these causes a deadlock where Claude Code cannot compact.
     // See: https://github.com/Yeachan-Heo/oh-my-claudecode/issues/213
     if (isContextLimitStop(data)) {
-      console.log(JSON.stringify({ continue: true }));
+      console.log(JSON.stringify({ continue: true, suppressOutput: true }));
       return;
     }
 
     // Respect user abort (Ctrl+C, cancel)
     if (isUserAbort(data)) {
-      console.log(JSON.stringify({ continue: true }));
+      console.log(JSON.stringify({ continue: true, suppressOutput: true }));
       return;
     }
 
@@ -698,7 +699,7 @@ async function main() {
 
       if (newCount > maxReinforcements) {
         // Max reinforcements reached - allow stop
-        console.log(JSON.stringify({ continue: true }));
+        console.log(JSON.stringify({ continue: true, suppressOutput: true }));
         return;
       }
 
@@ -748,7 +749,7 @@ async function main() {
 
       if (newCount > maxReinforcements) {
         // Max reinforcements reached - allow stop
-        console.log(JSON.stringify({ continue: true }));
+        console.log(JSON.stringify({ continue: true, suppressOutput: true }));
         return;
       }
 
@@ -781,11 +782,11 @@ async function main() {
     }
 
     // No blocking needed
-    console.log(JSON.stringify({ continue: true }));
+    console.log(JSON.stringify({ continue: true, suppressOutput: true }));
   } catch (error) {
     // On any error, allow stop rather than blocking forever
     console.error(`[persistent-mode] Error: ${error.message}`);
-    console.log(JSON.stringify({ continue: true }));
+    console.log(JSON.stringify({ continue: true, suppressOutput: true }));
   }
 }
 

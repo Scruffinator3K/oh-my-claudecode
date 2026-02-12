@@ -9,10 +9,10 @@
  * Bash scripts were deprecated in v3.8.6 and removed in v3.9.0.
  */
 
-import { homedir } from "os";
 import { join, dirname } from "path";
 import { readFileSync, existsSync } from "fs";
 import { fileURLToPath } from "url";
+import { getConfigDir } from '../utils/config-dir.js';
 
 // =============================================================================
 // TEMPLATE LOADER (loads hook scripts from templates/hooks/)
@@ -20,13 +20,27 @@ import { fileURLToPath } from "url";
 
 /**
  * Get the package root directory (where templates/ lives)
- * Works for both development (src/) and production (dist/)
+ * Works for both development (src/), production (dist/), and CJS bundles (bridge/).
+ * When esbuild bundles to CJS, import.meta is replaced with {} so we
+ * fall back to __dirname which is natively available in CJS.
  */
 function getPackageDir(): string {
-  const __filename = fileURLToPath(import.meta.url);
-  const __dirname = dirname(__filename);
-  // From src/installer/ or dist/installer/, go up two levels to package root
-  return join(__dirname, "..", "..");
+  try {
+    if (import.meta?.url) {
+      const __filename = fileURLToPath(import.meta.url);
+      const __dirname = dirname(__filename);
+      // From src/installer/ or dist/installer/, go up two levels to package root
+      return join(__dirname, "..", "..");
+    }
+  } catch {
+    // import.meta.url unavailable — fall through to CJS path
+  }
+  // CJS bundle path: from bridge/ go up 1 level to package root
+  // eslint-disable-next-line no-undef
+  if (typeof __dirname !== "undefined") {
+    return join(__dirname, "..");
+  }
+  return process.cwd();
 }
 
 /**
@@ -66,7 +80,7 @@ export function shouldUseNodeHooks(): boolean {
 
 /** Get the Claude config directory path (cross-platform) */
 export function getClaudeConfigDir(): string {
-  return join(homedir(), ".claude");
+  return getConfigDir();
 }
 
 /** Get the hooks directory path */

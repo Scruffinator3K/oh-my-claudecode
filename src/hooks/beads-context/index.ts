@@ -1,5 +1,5 @@
 import { contextCollector } from '../../features/context-injector/index.js';
-import { getSisyphusConfig } from '../../features/auto-update.js';
+import { getOMCConfig } from '../../features/auto-update.js';
 import { BEADS_INSTRUCTIONS, BEADS_RUST_INSTRUCTIONS } from './constants.js';
 import type { TaskTool, BeadsContextConfig } from './types.js';
 
@@ -29,7 +29,7 @@ export function getBeadsInstructions(tool: Exclude<TaskTool, 'builtin'>): string
  * Read beads context config from omc-config.json.
  */
 export function getBeadsContextConfig(): BeadsContextConfig {
-  const config = getSisyphusConfig();
+  const config = getOMCConfig();
   return {
     taskTool: config.taskTool ?? 'builtin',
     injectInstructions: config.taskToolConfig?.injectInstructions ?? true,

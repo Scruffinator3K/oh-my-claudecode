@@ -12,10 +12,11 @@
 
 import { readFileSync, writeFileSync, existsSync, mkdirSync } from 'fs';
 import { join, dirname } from 'path';
-import { homedir } from 'os';
 import { execSync } from 'child_process';
 import { TaskTool } from '../hooks/beads-context/types.js';
 import { install as installSisyphus, HOOKS_DIR, isProjectScopedPlugin, isRunningAsPlugin } from '../installer/index.js';
+import { getConfigDir } from '../utils/config-dir.js';
+import type { NotificationConfig } from '../notifications/types.js';
 
 /** GitHub repository information */
 export const REPO_OWNER = 'Yeachan-Heo';
@@ -23,8 +24,41 @@ export const REPO_NAME = 'oh-my-claudecode';
 export const GITHUB_API_URL = `https://api.github.com/repos/${REPO_OWNER}/${REPO_NAME}`;
 export const GITHUB_RAW_URL = `https://raw.githubusercontent.com/${REPO_OWNER}/${REPO_NAME}`;
 
-/** Installation paths */
-export const CLAUDE_CONFIG_DIR = join(homedir(), '.claude');
+/**
+ * Best-effort sync of the Claude Code marketplace clone.
+ * The marketplace clone at ~/.claude/plugins/marketplaces/omc/ is used by
+ * Claude Code to populate the plugin cache. If it's stale, `/plugin install`
+ * and cache rebuilds reinstall old versions. (See #506)
+ */
+function syncMarketplaceClone(verbose: boolean = false): { ok: boolean; message: string } {
+  const marketplacePath = join(getConfigDir(), 'plugins', 'marketplaces', 'omc');
+  if (!existsSync(marketplacePath)) {
+    return { ok: true, message: 'Marketplace clone not found; skipping' };
+  }
+
+  const stdio = verbose ? 'inherit' : 'pipe';
+  const execOpts = { encoding: 'utf-8' as const, stdio: stdio as any, timeout: 60000 };
+
+  try {
+    execSync(`git -C "${marketplacePath}" fetch --all --prune`, execOpts);
+  } catch (err) {
+    return { ok: false, message: `Failed to fetch marketplace clone: ${err instanceof Error ? err.message : err}` };
+  }
+
+  // Ensure we're on main (ignore errors for older clones on different branches)
+  try { execSync(`git -C "${marketplacePath}" checkout main`, { ...execOpts, timeout: 15000 }); } catch { /* ignore checkout errors on older clones */ }
+
+  try {
+    execSync(`git -C "${marketplacePath}" pull --ff-only origin main`, execOpts);
+  } catch (err) {
+    return { ok: false, message: `Failed to update marketplace clone: ${err instanceof Error ? err.message : err}` };
+  }
+
+  return { ok: true, message: 'Marketplace clone updated' };
+}
+
+/** Installation paths (respects CLAUDE_CONFIG_DIR env var) */
+export const CLAUDE_CONFIG_DIR = getConfigDir();
 export const VERSION_FILE = join(CLAUDE_CONFIG_DIR, '.omc-version.json');
 export const CONFIG_FILE = join(CLAUDE_CONFIG_DIR, '.omc-config.json');
 
@@ -48,6 +82,8 @@ export interface StopCallbackTelegramConfig {
   botToken?: string;
   /** Chat ID to send messages to */
   chatId?: string;
+  /** Optional tags/usernames to prefix in notifications */
+  tagList?: string[];
 }
 
 /**
@@ -57,6 +93,8 @@ export interface StopCallbackDiscordConfig {
   enabled: boolean;
   /** Discord webhook URL */
   webhookUrl?: string;
+  /** Optional tags/user IDs/roles to prefix in notifications */
+  tagList?: string[];
 }
 
 /**
@@ -71,7 +109,7 @@ export interface StopHookCallbacksConfig {
 /**
  * OMC configuration (stored in .omc-config.json)
  */
-export interface SisyphusConfig {
+export interface OMCConfig {
   /** Whether silent auto-updates are enabled (opt-in for security) */
   silentAutoUpdate: boolean;
   /** When the configuration was set */
@@ -98,14 +136,18 @@ export interface SisyphusConfig {
   setupCompleted?: string;
   /** Version of setup wizard that was completed */
   setupVersion?: string;
-  /** Stop hook callback configuration */
+  /** Stop hook callback configuration (legacy, use notifications instead) */
   stopHookCallbacks?: StopHookCallbacksConfig;
+  /** Multi-platform lifecycle notification configuration */
+  notifications?: NotificationConfig;
+  /** Whether HUD statusline is enabled (default: true). Set to false to skip HUD installation. */
+  hudEnabled?: boolean;
 }
 
 /**
- * Read the Sisyphus configuration
+ * Read the OMC configuration
  */
-export function getSisyphusConfig(): SisyphusConfig {
+export function getOMCConfig(): OMCConfig {
   if (!existsSync(CONFIG_FILE)) {
     // No config file = disabled by default for security
     return { silentAutoUpdate: false };
@@ -113,7 +155,7 @@ export function getSisyphusConfig(): SisyphusConfig {
 
   try {
     const content = readFileSync(CONFIG_FILE, 'utf-8');
-    const config = JSON.parse(content) as SisyphusConfig;
+    const config = JSON.parse(content) as OMCConfig;
     return {
       silentAutoUpdate: config.silentAutoUpdate ?? false,
       configuredAt: config.configuredAt,
@@ -125,6 +167,8 @@ export function getSisyphusConfig(): SisyphusConfig {
       setupCompleted: config.setupCompleted,
       setupVersion: config.setupVersion,
       stopHookCallbacks: config.stopHookCallbacks,
+      notifications: config.notifications,
+      hudEnabled: config.hudEnabled,
     };
   } catch {
     // If config file is invalid, default to disabled for security
@@ -136,7 +180,7 @@ export function getSisyphusConfig(): SisyphusConfig {
  * Check if silent auto-updates are enabled
  */
 export function isSilentAutoUpdateEnabled(): boolean {
-  return getSisyphusConfig().silentAutoUpdate;
+  return getOMCConfig().silentAutoUpdate;
 }
 
 /**
@@ -144,9 +188,31 @@ export function isSilentAutoUpdateEnabled(): boolean {
  * Returns true by default if not explicitly disabled
  */
 export function isEcomodeEnabled(): boolean {
-  const config = getSisyphusConfig();
+  const config = getOMCConfig();
   // Default to true if not configured
   return config.ecomode?.enabled !== false;
+}
+
+/**
+ * Check if team feature is enabled
+ * Returns false by default - requires explicit opt-in
+ * Checks ~/.claude/settings.json first, then env var fallback
+ */
+export function isTeamEnabled(): boolean {
+  try {
+    const settingsPath = join(CLAUDE_CONFIG_DIR, 'settings.json');
+    if (existsSync(settingsPath)) {
+      const settings = JSON.parse(readFileSync(settingsPath, 'utf-8'));
+      const val = settings.env?.CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS;
+      if (val === '1' || val === 'true') {
+        return true;
+      }
+    }
+  } catch {
+    // Fall through to env check
+  }
+  const envVal = process.env.CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS;
+  return envVal === '1' || envVal === 'true';
 }
 
 /**
@@ -441,6 +507,12 @@ export async function performUpdate(options?: {
         timeout: 120000, // 2 minute timeout for npm
         ...(process.platform === 'win32' ? { windowsHide: true } : {})
       });
+
+      // Sync Claude Code marketplace clone so plugin cache picks up new version (#506)
+      const marketplaceSync = syncMarketplaceClone(options?.verbose ?? false);
+      if (!marketplaceSync.ok && options?.verbose) {
+        console.warn(`[omc update] ${marketplaceSync.message}`);
+      }
 
       const reconcileResult = reconcileUpdateRuntime({ verbose: options?.verbose });
       if (!reconcileResult.success) {

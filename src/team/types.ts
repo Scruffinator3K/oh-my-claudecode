@@ -58,7 +58,7 @@ export interface InboxMessage {
 
 /** JSONL message from worker -> lead (outbox) */
 export interface OutboxMessage {
-  type: 'task_complete' | 'task_failed' | 'idle' | 'shutdown_ack' | 'drain_ack' | 'heartbeat' | 'error';
+  type: 'ready' | 'task_complete' | 'task_failed' | 'idle' | 'shutdown_ack' | 'drain_ack' | 'heartbeat' | 'error';
   taskId?: string;
   summary?: string;
   message?: string;
@@ -103,7 +103,7 @@ export interface HeartbeatData {
   lastPollAt: string;       // ISO timestamp of last poll cycle
   currentTaskId?: string;   // task being executed, if any
   consecutiveErrors: number;
-  status: 'polling' | 'executing' | 'shutdown' | 'quarantined';
+  status: 'ready' | 'polling' | 'executing' | 'shutdown' | 'quarantined';
 }
 
 /** Offset cursor for JSONL consumption */

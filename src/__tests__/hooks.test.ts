@@ -2,6 +2,7 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { mkdirSync, writeFileSync, rmSync } from 'fs';
 import { join } from 'path';
 import { tmpdir } from 'os';
+import { execSync } from 'child_process';
 import {
   extractPromptText,
   removeCodeBlocks,
@@ -233,10 +234,11 @@ describe('Keyword Detector', () => {
       }
     });
 
-    it('should route legacy ultrapilot keyword to team', () => {
+    it('should route legacy ultrapilot keyword to team (with dual-emission)', () => {
       const detected = detectKeywordsWithType('use ultrapilot for this');
-      expect(detected).toHaveLength(1);
-      expect(detected[0].type).toBe('team');
+      expect(detected).toHaveLength(2);
+      expect(detected[0].type).toBe('ultrapilot');
+      expect(detected[1].type).toBe('team');
       expect(detected[0].keyword).toBe('ultrapilot');
     });
 
@@ -271,17 +273,19 @@ describe('Keyword Detector', () => {
       }
     });
 
-    it('should route legacy swarm keyword to team', () => {
+    it('should route legacy swarm keyword to team (with dual-emission)', () => {
       const detected = detectKeywordsWithType('swarm 5 agents to fix this');
-      expect(detected).toHaveLength(1);
-      expect(detected[0].type).toBe('team');
+      expect(detected).toHaveLength(2);
+      expect(detected[0].type).toBe('swarm');
+      expect(detected[1].type).toBe('team');
       expect(detected[0].keyword).toBe('swarm 5 agents');
     });
 
-    it('should route coordinated agents pattern to team', () => {
+    it('should route coordinated agents pattern to team (with dual-emission)', () => {
       const detected = detectKeywordsWithType('use coordinated agents');
-      expect(detected).toHaveLength(1);
-      expect(detected[0].type).toBe('team');
+      expect(detected).toHaveLength(2);
+      expect(detected[0].type).toBe('swarm');
+      expect(detected[1].type).toBe('team');
       expect(detected[0].keyword).toBe('coordinated agents');
     });
 
@@ -528,10 +532,10 @@ describe('Keyword Detector', () => {
       expect(primary!.type).toBe('ralph');
     });
 
-    it('should prioritize team for legacy ultrapilot trigger', () => {
+    it('should prioritize ultrapilot for legacy ultrapilot trigger', () => {
       const primary = getPrimaryKeyword('ultrapilot this task');
       expect(primary).not.toBeNull();
-      expect(primary!.type).toBe('team');
+      expect(primary!.type).toBe('ultrapilot');
     });
 
     it('should prioritize ecomode correctly', () => {
@@ -597,6 +601,7 @@ describe('Team staged workflow integration', () => {
   beforeEach(() => {
     testDir = join(tmpdir(), `omc-team-test-${Date.now()}-${Math.random().toString(36).slice(2)}`);
     mkdirSync(join(testDir, '.omc', 'state', 'sessions', sessionId), { recursive: true });
+    execSync('git init', { cwd: testDir });
   });
 
   afterEach(() => {

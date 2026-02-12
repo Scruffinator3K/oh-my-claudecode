@@ -565,7 +565,7 @@ describe('delegation-enforcement-levels', () => {
         expect.stringContaining('task-'),
         'Test task',
         'executor',
-        '/tmp/test-project'
+        process.cwd()
       );
     });
   });

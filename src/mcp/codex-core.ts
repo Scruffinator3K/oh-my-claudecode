@@ -16,8 +16,8 @@ import { createStdoutCollector, safeWriteOutputFile } from './shared-exec.js';
 import { detectCodexCli } from './cli-detection.js';
 import { getWorktreeRoot } from '../lib/worktree-paths.js';
 import { isExternalPromptAllowed } from './mcp-config.js';
-import { resolveSystemPrompt, buildPromptWithSystemContext, wrapUntrustedFileContent, isValidAgentRoleName, VALID_AGENT_ROLES } from './prompt-injection.js';
-import { persistPrompt, persistResponse, getExpectedResponsePath } from './prompt-persistence.js';
+import { resolveSystemPrompt, buildPromptWithSystemContext, wrapUntrustedFileContent, wrapUntrustedCliResponse, isValidAgentRoleName, VALID_AGENT_ROLES, singleErrorBlock, inlineSuccessBlocks } from './prompt-injection.js';
+import { persistPrompt, persistResponse, getExpectedResponsePath, getPromptsDir, slugify, generatePromptId } from './prompt-persistence.js';
 import { writeJobStatus, getStatusFilePath, readJobStatus } from './prompt-persistence.js';
 import type { JobStatus, BackgroundJobMeta } from './prompt-persistence.js';
 import {
@@ -51,6 +51,11 @@ function validateModelName(model: string): void {
 export const CODEX_DEFAULT_MODEL = process.env.OMC_CODEX_DEFAULT_MODEL || 'gpt-5.3-codex';
 export const CODEX_TIMEOUT = Math.min(Math.max(5000, parseInt(process.env.OMC_CODEX_TIMEOUT || '3600000', 10) || 3600000), 3600000);
 
+// Rate limit backoff configuration (configurable via environment variables)
+export const RATE_LIMIT_RETRY_COUNT = Math.min(10, Math.max(1, parseInt(process.env.OMC_CODEX_RATE_LIMIT_RETRY_COUNT || '3', 10) || 3));
+export const RATE_LIMIT_INITIAL_DELAY = Math.max(1000, parseInt(process.env.OMC_CODEX_RATE_LIMIT_INITIAL_DELAY || '5000', 10) || 5000);
+export const RATE_LIMIT_MAX_DELAY = Math.max(5000, parseInt(process.env.OMC_CODEX_RATE_LIMIT_MAX_DELAY || '60000', 10) || 60000);
+
 // Re-export CODEX_MODEL_FALLBACKS for backward compatibility
 export { CODEX_MODEL_FALLBACKS };
 
@@ -59,6 +64,28 @@ export const CODEX_RECOMMENDED_ROLES = ['architect', 'planner', 'critic', 'analy
 
 export const MAX_FILE_SIZE = 5 * 1024 * 1024; // 5MB per file
 export const MAX_STDOUT_BYTES = 10 * 1024 * 1024; // 10MB stdout cap
+
+/**
+ * Compute exponential backoff delay with jitter for rate limit retries.
+ * Returns delay in ms: min(initialDelay * 2^attempt, maxDelay) * random(0.5, 1.0)
+ */
+export function computeBackoffDelay(
+  attempt: number,
+  initialDelay: number = RATE_LIMIT_INITIAL_DELAY,
+  maxDelay: number = RATE_LIMIT_MAX_DELAY,
+): number {
+  const exponential = initialDelay * Math.pow(2, attempt);
+  const capped = Math.min(exponential, maxDelay);
+  const jitter = capped * (0.5 + Math.random() * 0.5);
+  return Math.round(jitter);
+}
+
+/**
+ * Sleep for the specified duration. Exported for test mockability.
+ */
+export function sleep(ms: number): Promise<void> {
+  return new Promise(resolve => setTimeout(resolve, ms));
+}
 
 /**
  * Check if Codex JSONL output contains a model-not-found error
@@ -257,22 +284,42 @@ export function executeCodex(prompt: string, model: string, cwd?: string): Promi
 }
 
 /**
- * Execute Codex CLI with model fallback chain
- * Only falls back on model_not_found errors when model was not explicitly provided
+ * Execute Codex CLI with model fallback chain and exponential backoff on rate limits.
+ * Falls back on model_not_found or rate limit errors when model was not explicitly provided.
+ * When model IS explicit, retries the same model with backoff on rate limit.
  */
 export async function executeCodexWithFallback(
   prompt: string,
   model: string | undefined,
   cwd?: string,
-  fallbackChain?: string[]
+  fallbackChain?: string[],
+  /** @internal Testing overrides */
+  overrides?: { executor?: typeof executeCodex; sleepFn?: typeof sleep },
 ): Promise<{ response: string; usedFallback: boolean; actualModel: string }> {
+  const exec = overrides?.executor ?? executeCodex;
+  const sleepFn = overrides?.sleepFn ?? sleep;
   const modelExplicit = model !== undefined && model !== null && model !== '';
   const effectiveModel = model || CODEX_DEFAULT_MODEL;
 
-  // If model was explicitly provided, no fallback
+  // If model was explicitly provided, retry with backoff on rate limit (no fallback chain)
   if (modelExplicit) {
-    const response = await executeCodex(prompt, effectiveModel, cwd);
-    return { response, usedFallback: false, actualModel: effectiveModel };
+    let lastError: Error | null = null;
+    for (let attempt = 0; attempt <= RATE_LIMIT_RETRY_COUNT; attempt++) {
+      try {
+        const response = await exec(prompt, effectiveModel, cwd);
+        return { response, usedFallback: false, actualModel: effectiveModel };
+      } catch (err) {
+        lastError = err as Error;
+        if (!/429|rate.?limit|too many requests|quota.?exceeded|resource.?exhausted/i.test(lastError.message)) {
+          throw lastError; // Non-rate-limit error, throw immediately
+        }
+        if (attempt < RATE_LIMIT_RETRY_COUNT) {
+          const delay = computeBackoffDelay(attempt, RATE_LIMIT_INITIAL_DELAY, RATE_LIMIT_MAX_DELAY);
+          await sleepFn(delay);
+        }
+      }
+    }
+    throw lastError || new Error('Codex rate limit: all retries exhausted');
   }
 
   // Use provided fallback chain or build from defaults
@@ -282,9 +329,10 @@ export async function executeCodexWithFallback(
     : [effectiveModel, ...chain];
 
   let lastError: Error | null = null;
+  let rateLimitAttempt = 0;
   for (const tryModel of modelsToTry) {
     try {
-      const response = await executeCodex(prompt, tryModel, cwd);
+      const response = await exec(prompt, tryModel, cwd);
       return {
         response,
         usedFallback: tryModel !== effectiveModel,
@@ -296,7 +344,13 @@ export async function executeCodexWithFallback(
       if (!/model error|model_not_found|model is not supported|429|rate.?limit|too many requests|quota.?exceeded|resource.?exhausted/i.test(lastError.message)) {
         throw lastError; // Non-retryable error, don't retry
       }
-      // Continue to next model in chain
+      // Add backoff delay for rate limit errors before trying next model
+      if (/429|rate.?limit|too many requests|quota.?exceeded|resource.?exhausted/i.test(lastError.message)) {
+        const delay = computeBackoffDelay(rateLimitAttempt, RATE_LIMIT_INITIAL_DELAY, RATE_LIMIT_MAX_DELAY);
+        await sleepFn(delay);
+        rateLimitAttempt++;
+      }
+      // Continue to next model in chain (no delay for model errors)
     }
   }
 
@@ -324,7 +378,7 @@ export function executeCodexBackground(
           : [effectiveModel, ...CODEX_MODEL_FALLBACKS]);
 
     // Helper to try spawning with a specific model
-    const trySpawnWithModel = (tryModel: string, remainingModels: string[]): { pid: number } | { error: string } => {
+    const trySpawnWithModel = (tryModel: string, remainingModels: string[], rateLimitAttempt: number = 0): { pid: number } | { error: string } => {
       validateModelName(tryModel);
       const args = ['exec', '-m', tryModel, '--json', '--full-auto'];
       const child = spawn(resolveCommand('codex'), args, {
@@ -363,6 +417,7 @@ export function executeCodexBackground(
       const timeoutHandle = setTimeout(() => {
         if (!settled) {
           settled = true;
+          spawnedPids.delete(pid);
           try {
             // Detached children are process-group leaders on POSIX.
             if (process.platform !== 'win32') process.kill(-pid, 'SIGTERM');
@@ -416,24 +471,58 @@ export function executeCodexBackground(
         if (code === 0 || stdout.trim()) {
           // Check for retryable errors (model errors + rate limit/429 errors)
           const retryableErr = isRetryableError(stdout, stderr);
-          if (retryableErr.isError && remainingModels.length > 0) {
-            // Retry with next model in chain
-            const nextModel = remainingModels[0];
-            const newRemainingModels = remainingModels.slice(1);
-            const retryResult = trySpawnWithModel(nextModel, newRemainingModels);
-            if ('error' in retryResult) {
-              // Retry spawn failed - write failed status
-              writeJobStatus({
-                ...initialStatus,
-                status: 'failed',
-                completedAt: new Date().toISOString(),
-                error: `Fallback spawn failed for model ${nextModel}: ${retryResult.error}`,
-              }, workingDirectory);
-            }
-            return;
-          }
           if (retryableErr.isError) {
-            // No remaining models and current model errored
+            const isRateLimit = retryableErr.type === 'rate_limit';
+
+            // Rate limit with explicit model: retry same model with backoff
+            if (isRateLimit && modelExplicit && rateLimitAttempt < RATE_LIMIT_RETRY_COUNT) {
+              const delay = computeBackoffDelay(rateLimitAttempt, RATE_LIMIT_INITIAL_DELAY, RATE_LIMIT_MAX_DELAY);
+              setTimeout(() => {
+                const retryResult = trySpawnWithModel(tryModel, remainingModels, rateLimitAttempt + 1);
+                if ('error' in retryResult) {
+                  writeJobStatus({
+                    ...initialStatus,
+                    status: 'failed',
+                    completedAt: new Date().toISOString(),
+                    error: `Rate limit retry failed for model ${tryModel}: ${retryResult.error}`,
+                  }, workingDirectory);
+                }
+              }, delay);
+              return;
+            }
+
+            // Fallback chain: try next model (with backoff for rate limit, immediate for model errors)
+            if (remainingModels.length > 0) {
+              const nextModel = remainingModels[0];
+              const newRemainingModels = remainingModels.slice(1);
+              if (isRateLimit) {
+                const delay = computeBackoffDelay(rateLimitAttempt, RATE_LIMIT_INITIAL_DELAY, RATE_LIMIT_MAX_DELAY);
+                setTimeout(() => {
+                  const retryResult = trySpawnWithModel(nextModel, newRemainingModels, rateLimitAttempt + 1);
+                  if ('error' in retryResult) {
+                    writeJobStatus({
+                      ...initialStatus,
+                      status: 'failed',
+                      completedAt: new Date().toISOString(),
+                      error: `Fallback spawn failed for model ${nextModel}: ${retryResult.error}`,
+                    }, workingDirectory);
+                  }
+                }, delay);
+              } else {
+                const retryResult = trySpawnWithModel(nextModel, newRemainingModels, rateLimitAttempt);
+                if ('error' in retryResult) {
+                  writeJobStatus({
+                    ...initialStatus,
+                    status: 'failed',
+                    completedAt: new Date().toISOString(),
+                    error: `Fallback spawn failed for model ${nextModel}: ${retryResult.error}`,
+                  }, workingDirectory);
+                }
+              }
+              return;
+            }
+
+            // No remaining models and no retries left
             writeJobStatus({
               ...initialStatus,
               status: 'failed',
@@ -467,19 +556,56 @@ export function executeCodexBackground(
         } else {
           // Check if the failure is a retryable error (429/rate limit) before giving up
           const retryableExit = isRetryableError(stderr, stdout);
-          if (retryableExit.isError && remainingModels.length > 0) {
-            const nextModel = remainingModels[0];
-            const newRemainingModels = remainingModels.slice(1);
-            const retryResult = trySpawnWithModel(nextModel, newRemainingModels);
-            if ('error' in retryResult) {
-              writeJobStatus({
-                ...initialStatus,
-                status: 'failed',
-                completedAt: new Date().toISOString(),
-                error: `Fallback spawn failed for model ${nextModel}: ${retryResult.error}`,
-              }, workingDirectory);
+          if (retryableExit.isError) {
+            const isRateLimit = retryableExit.type === 'rate_limit';
+
+            // Rate limit with explicit model: retry same model with backoff
+            if (isRateLimit && modelExplicit && rateLimitAttempt < RATE_LIMIT_RETRY_COUNT) {
+              const delay = computeBackoffDelay(rateLimitAttempt, RATE_LIMIT_INITIAL_DELAY, RATE_LIMIT_MAX_DELAY);
+              setTimeout(() => {
+                const retryResult = trySpawnWithModel(tryModel, remainingModels, rateLimitAttempt + 1);
+                if ('error' in retryResult) {
+                  writeJobStatus({
+                    ...initialStatus,
+                    status: 'failed',
+                    completedAt: new Date().toISOString(),
+                    error: `Rate limit retry failed for model ${tryModel}: ${retryResult.error}`,
+                  }, workingDirectory);
+                }
+              }, delay);
+              return;
             }
-            return;
+
+            // Fallback chain: try next model (with backoff for rate limit, immediate for model errors)
+            if (remainingModels.length > 0) {
+              const nextModel = remainingModels[0];
+              const newRemainingModels = remainingModels.slice(1);
+              if (isRateLimit) {
+                const delay = computeBackoffDelay(rateLimitAttempt, RATE_LIMIT_INITIAL_DELAY, RATE_LIMIT_MAX_DELAY);
+                setTimeout(() => {
+                  const retryResult = trySpawnWithModel(nextModel, newRemainingModels, rateLimitAttempt + 1);
+                  if ('error' in retryResult) {
+                    writeJobStatus({
+                      ...initialStatus,
+                      status: 'failed',
+                      completedAt: new Date().toISOString(),
+                      error: `Fallback spawn failed for model ${nextModel}: ${retryResult.error}`,
+                    }, workingDirectory);
+                  }
+                }, delay);
+              } else {
+                const retryResult = trySpawnWithModel(nextModel, newRemainingModels, rateLimitAttempt);
+                if ('error' in retryResult) {
+                  writeJobStatus({
+                    ...initialStatus,
+                    status: 'failed',
+                    completedAt: new Date().toISOString(),
+                    error: `Fallback spawn failed for model ${nextModel}: ${retryResult.error}`,
+                  }, workingDirectory);
+                }
+              }
+              return;
+            }
           }
           writeJobStatus({
             ...initialStatus,
@@ -558,20 +684,26 @@ export function validateAndReadFile(filePath: string, baseDir?: string): string 
  * the SDK server and the standalone stdio server.
  */
 export async function handleAskCodex(args: {
-  prompt_file: string;
-  output_file: string;
+  prompt?: string;
+  prompt_file?: string;
+  output_file?: string;
   agent_role: string;
   model?: string;
   context_files?: string[];
   background?: boolean;
   working_directory?: string;
 }): Promise<{ content: Array<{ type: 'text'; text: string }>; isError?: boolean }> {
+  if (!args || typeof args !== 'object' || Array.isArray(args)) {
+    return singleErrorBlock('Invalid request: args must be an object.');
+  }
+
   const { agent_role, context_files } = args;
 
   // Resolve model based on configuration and agent role
   const config = loadConfig();
   const resolved = resolveExternalModel(config.externalModels, {
     agentRole: args.agent_role,
+    explicitProvider: 'codex',
     explicitModel: args.model,  // user explicitly passed model
   });
 
@@ -587,16 +719,14 @@ export async function handleAskCodex(args: {
   const pathPolicy = process.env.OMC_ALLOW_EXTERNAL_WORKDIR === '1' ? 'permissive' : 'strict';
   try {
     baseDirReal = realpathSync(baseDir);
+    baseDir = baseDirReal;
   } catch (err) {
     const errorToken = 'E_WORKDIR_INVALID';
-    return {
-      content: [{ type: 'text' as const, text: `${errorToken}: working_directory '${args.working_directory}' does not exist or is not accessible.
+    return singleErrorBlock(`${errorToken}: working_directory '${args.working_directory}' does not exist or is not accessible.
 Error: ${(err as Error).message}
 Resolved working directory: ${baseDir}
 Path policy: ${pathPolicy}
-Suggested: ensure the working directory exists and is accessible` }],
-      isError: true
-    };
+Suggested: ensure the working directory exists and is accessible`);
   }
 
   // Security: validate working_directory is within worktree (unless bypass enabled)
@@ -614,15 +744,12 @@ Suggested: ensure the working directory exists and is accessible` }],
         const relToWorktree = relative(worktreeReal, baseDirReal);
         if (relToWorktree.startsWith('..') || isAbsolute(relToWorktree)) {
           const errorToken = 'E_WORKDIR_INVALID';
-          return {
-            content: [{ type: 'text' as const, text: `${errorToken}: working_directory '${args.working_directory}' is outside the project worktree (${worktreeRoot}).
+          return singleErrorBlock(`${errorToken}: working_directory '${args.working_directory}' is outside the project worktree (${worktreeRoot}).
 Requested: ${args.working_directory}
 Resolved working directory: ${baseDirReal}
 Worktree root: ${worktreeRoot}
 Path policy: ${pathPolicy}
-Suggested: use a working_directory within the project worktree, or set OMC_ALLOW_EXTERNAL_WORKDIR=1 to bypass` }],
-            isError: true
-          };
+Suggested: use a working_directory within the project worktree, or set OMC_ALLOW_EXTERNAL_WORKDIR=1 to bypass`);
         }
       }
     }
@@ -630,75 +757,101 @@ Suggested: use a working_directory within the project worktree, or set OMC_ALLOW
 
 
   // Validate agent_role - must be non-empty and pass character validation
-  if (!agent_role || !agent_role.trim()) {
-    return {
-      content: [{
-        type: 'text' as const,
-        text: `agent_role is required. Recommended roles for Codex: ${CODEX_RECOMMENDED_ROLES.join(', ')}`
-      }],
-      isError: true
-    };
+  if (typeof agent_role !== 'string' || !agent_role.trim()) {
+    return singleErrorBlock('agent_role is required and must be a non-empty string.');
   }
   if (!isValidAgentRoleName(agent_role)) {
-    return {
-      content: [{
-        type: 'text' as const,
-        text: `Invalid agent_role: "${agent_role}". Role names must contain only lowercase letters, numbers, and hyphens. Recommended for Codex: ${CODEX_RECOMMENDED_ROLES.join(', ')}`
-      }],
-      isError: true
-    };
+    return singleErrorBlock(`Invalid agent_role: "${agent_role}". Role names must contain only lowercase letters, numbers, and hyphens. Recommended for Codex: ${CODEX_RECOMMENDED_ROLES.join(', ')}`);
   }
   // Validate agent_role exists in discovered roles (allowlist enforcement)
   if (!VALID_AGENT_ROLES.includes(agent_role)) {
-    return {
-      content: [{
-        type: 'text' as const,
-        text: `Unknown agent_role: "${agent_role}". Available roles: ${VALID_AGENT_ROLES.join(', ')}. Recommended for Codex: ${CODEX_RECOMMENDED_ROLES.join(', ')}`
-      }],
-      isError: true
-    };
+    return singleErrorBlock(`Unknown agent_role: "${agent_role}". Available roles: ${VALID_AGENT_ROLES.join(', ')}. Recommended for Codex: ${CODEX_RECOMMENDED_ROLES.join(', ')}`);
   }
 
-  // Validate output_file is provided
-  if (!args.output_file || !args.output_file.trim()) {
-    return {
-      content: [{ type: 'text' as const, text: 'output_file is required. Specify a path where the response should be written.' }],
-      isError: true
-    };
+  // Determine inline intent: caller provided `prompt` field without a defined `prompt_file` field.
+  // Defined-value precedence: if `prompt_file` key exists with a non-undefined value, file mode wins.
+  // This handles JSON-RPC serializers that emit `prompt_file: undefined` as "not provided".
+  // Separate intent detection (field presence) from content validation (non-empty).
+  const inlinePrompt = typeof args.prompt === 'string' ? args.prompt : undefined;
+  const hasPromptFileField = Object.prototype.hasOwnProperty.call(args, 'prompt_file') && args.prompt_file !== undefined;
+  const promptFileInput = hasPromptFileField && typeof args.prompt_file === 'string' ? args.prompt_file.trim() || undefined : undefined;
+  let resolvedPromptFile = promptFileInput;
+  let resolvedOutputFile = typeof args.output_file === 'string' ? args.output_file : undefined;
+  const hasInlineIntent = inlinePrompt !== undefined && !hasPromptFileField;
+  const isInlineMode = hasInlineIntent && inlinePrompt.trim().length > 0;
+
+  // Reject empty/whitespace inline prompt with explicit error BEFORE any side effects
+  if (hasInlineIntent && !inlinePrompt?.trim()) {
+    return singleErrorBlock('Inline prompt is empty. Provide a non-empty prompt string.');
   }
 
-  // Check if deprecated 'prompt' parameter is being used
-  if ('prompt' in (args as Record<string, unknown>)) {
-    return {
-      content: [{ type: 'text' as const, text: "The 'prompt' parameter has been removed. Write the prompt to a file (recommended: .omc/prompts/) and pass 'prompt_file' instead." }],
-      isError: true
-    };
+  // Reject oversized inline prompts before any persistence
+  const MAX_INLINE_PROMPT_BYTES = 256 * 1024; // 256 KB
+  if (isInlineMode && Buffer.byteLength(inlinePrompt as string, 'utf-8') > MAX_INLINE_PROMPT_BYTES) {
+    return singleErrorBlock(`Inline prompt exceeds maximum size (${MAX_INLINE_PROMPT_BYTES} bytes). Use prompt_file for large prompts.`);
   }
 
-  // Validate prompt_file is provided and not empty
-  if (!args.prompt_file || !args.prompt_file.trim()) {
-    return {
-      content: [{ type: 'text' as const, text: 'prompt_file is required.' }],
-      isError: true
-    };
+  // Inline mode is foreground only - check BEFORE any file persistence to avoid leaks
+  if (isInlineMode && args.background) {
+    return singleErrorBlock('Inline prompt mode is foreground only. Use prompt_file for background execution.');
   }
 
-  // Resolve prompt from prompt_file
+  // Explicit type error for non-string prompt_file (e.g., null, number, object)
+  if (hasPromptFileField && !promptFileInput) {
+    return singleErrorBlock('prompt_file must be a non-empty string when provided. Received non-string or empty value.');
+  }
+
+  let inlineRequestId: string | undefined;
+
+  // Handle inline prompt: auto-persist to file for audit trail
+  if (isInlineMode) {
+    inlineRequestId = generatePromptId();
+    try {
+      const promptsDir = getPromptsDir(baseDir);
+      mkdirSync(promptsDir, { recursive: true });
+      const slug = slugify(inlinePrompt as string);
+      const inlinePromptFile = join(promptsDir, `codex-inline-${slug}-${inlineRequestId}.md`);
+      writeFileSync(inlinePromptFile, inlinePrompt as string, { encoding: 'utf-8', mode: 0o600 });
+      const resolvedPromptFileLocal = inlinePromptFile;
+      const resolvedOutputFileLocal = (!resolvedOutputFile || !resolvedOutputFile.trim())
+        ? join(promptsDir, `codex-inline-response-${slug}-${inlineRequestId}.md`)
+        : resolvedOutputFile;
+      resolvedPromptFile = resolvedPromptFileLocal;
+      resolvedOutputFile = resolvedOutputFileLocal;
+    } catch (err) {
+      const reason = err instanceof Error ? err.message : 'unknown error';
+      return singleErrorBlock(`Failed to persist inline prompt (${reason}). Check working directory permissions and disk space.`);
+    }
+  }
+
+  // Validate that at least one prompt source is provided.
+  // Use type-guarded promptFileInput to avoid .trim() TypeError on non-string values.
+  const effectivePromptFile = resolvedPromptFile;
+  if (!effectivePromptFile || !effectivePromptFile.trim()) {
+    return singleErrorBlock("Either 'prompt' (inline) or 'prompt_file' (file path) is required.");
+  }
+
+  // output_file is required in file mode.
+  // Use typeof guard to avoid .trim() TypeError on non-string values.
+  const effectiveOutputFile = resolvedOutputFile;
+  if (!effectiveOutputFile || !effectiveOutputFile.trim()) {
+    return singleErrorBlock('output_file is required. Specify a path where the response should be written.');
+  }
+
+  // Resolve prompt from prompt_file (validated non-empty above)
   let resolvedPrompt: string;
-  const resolvedPath = resolve(baseDir, args.prompt_file);
+  const promptFile = effectivePromptFile;
+  const resolvedPath = resolve(baseDir, promptFile);
   const cwdReal = realpathSync(baseDir);
   const relPath = relative(cwdReal, resolvedPath);
   if (!isExternalPromptAllowed() && (relPath === '..' || relPath.startsWith('..' + sep) || isAbsolute(relPath))) {
     const errorToken = 'E_PATH_OUTSIDE_WORKDIR_PROMPT';
-    return {
-      content: [{ type: 'text' as const, text: `${errorToken}: prompt_file '${args.prompt_file}' resolves outside working_directory '${baseDirReal}'.
-Requested: ${args.prompt_file}
+    return singleErrorBlock(`${errorToken}: prompt_file '${promptFile}' resolves outside working_directory '${baseDirReal}'.
+Requested: ${promptFile}
 Working directory: ${baseDirReal}
 Resolved working directory: ${baseDirReal}
 Path policy: ${pathPolicy}
-Suggested: place the prompt file within the working directory or set working_directory to a common ancestor` }],
-      isError: true
-    };
+Suggested: place the prompt file within the working directory or set working_directory to a common ancestor`);
   }
   // BEFORE reading, resolve symlinks and validate boundary
   let resolvedReal: string;
@@ -706,44 +859,32 @@ Suggested: place the prompt file within the working directory or set working_dir
     resolvedReal = realpathSync(resolvedPath);
   } catch (err) {
     const errorToken = 'E_PATH_RESOLUTION_FAILED';
-    return {
-      content: [{ type: 'text' as const, text: `${errorToken}: Failed to resolve prompt_file '${args.prompt_file}'.
+    return singleErrorBlock(`${errorToken}: Failed to resolve prompt_file '${promptFile}'.
 Error: ${(err as Error).message}
 Resolved working directory: ${baseDirReal}
 Path policy: ${pathPolicy}
-Suggested: ensure the prompt file exists and is accessible` }],
-      isError: true
-    };
+Suggested: ensure the prompt file exists and is accessible`);
   }
   const relReal = relative(cwdReal, resolvedReal);
   if (!isExternalPromptAllowed() && (relReal === '..' || relReal.startsWith('..' + sep) || isAbsolute(relReal))) {
     const errorToken = 'E_PATH_OUTSIDE_WORKDIR_PROMPT';
-    return {
-      content: [{ type: 'text' as const, text: `${errorToken}: prompt_file '${args.prompt_file}' resolves to a path outside working_directory '${baseDirReal}'.
-Requested: ${args.prompt_file}
+    return singleErrorBlock(`${errorToken}: prompt_file '${promptFile}' resolves to a path outside working_directory '${baseDirReal}'.
+Requested: ${promptFile}
 Resolved path: ${resolvedReal}
 Working directory: ${baseDirReal}
 Resolved working directory: ${baseDirReal}
 Path policy: ${pathPolicy}
-Suggested: place the prompt file within the working directory or set working_directory to a common ancestor` }],
-      isError: true
-    };
+Suggested: place the prompt file within the working directory or set working_directory to a common ancestor`);
   }
   // Now safe to read from the validated real path
   try {
     resolvedPrompt = readFileSync(resolvedReal, 'utf-8');
   } catch (err) {
-    return {
-      content: [{ type: 'text' as const, text: `Failed to read prompt_file '${args.prompt_file}': ${(err as Error).message}` }],
-      isError: true
-    };
+    return singleErrorBlock(`Failed to read prompt_file '${promptFile}': ${(err as Error).message}`);
   }
   // Check for empty prompt
   if (!resolvedPrompt.trim()) {
-    return {
-      content: [{ type: 'text' as const, text: `prompt_file '${args.prompt_file}' is empty.` }],
-      isError: true
-    };
+    return singleErrorBlock(`prompt_file '${promptFile}' is empty.`);
   }
 
   // Add headless execution context so Codex produces comprehensive output
@@ -754,17 +895,11 @@ ${resolvedPrompt}`;
   // Check CLI availability
   const detection = detectCodexCli();
   if (!detection.available) {
-    return {
-      content: [{
-        type: 'text' as const,
-        text: `Codex CLI is not available: ${detection.error}\n\n${detection.installHint}`
-      }],
-      isError: true
-    };
+    return singleErrorBlock(`Codex CLI is not available: ${detection.error}\n\n${detection.installHint}`);
   }
 
   // Resolve system prompt from agent role
-  const resolvedSystemPrompt = resolveSystemPrompt(undefined, agent_role);
+  const resolvedSystemPrompt = resolveSystemPrompt(undefined, agent_role, 'codex');
 
   // Build file context
   let fileContext: string | undefined;
@@ -794,10 +929,7 @@ ${resolvedPrompt}`;
   // Background mode: return immediately with job metadata
   if (args.background) {
     if (!promptResult) {
-      return {
-        content: [{ type: 'text' as const, text: 'Failed to persist prompt for background execution' }],
-        isError: true
-      };
+      return singleErrorBlock('Failed to persist prompt for background execution');
     }
 
     const statusFilePath = getStatusFilePath('codex', promptResult.slug, promptResult.id, baseDir);
@@ -812,10 +944,7 @@ ${resolvedPrompt}`;
     }, baseDir);
 
     if ('error' in result) {
-      return {
-        content: [{ type: 'text' as const, text: `Failed to spawn background job: ${result.error}` }],
-        isError: true
-      };
+      return singleErrorBlock(`Failed to spawn background job: ${result.error}`);
     }
 
     return {
@@ -869,32 +998,34 @@ ${resolvedPrompt}`;
     // We no longer use -o (--output-last-message) because it only captures the
     // last agent message, which may be a brief acknowledgment. The JSONL-parsed
     // stdout contains ALL agent messages and is always more comprehensive.
-    if (args.output_file) {
-      const writeResult = safeWriteOutputFile(args.output_file, response, baseDirReal, '[codex-core]');
+    if (effectiveOutputFile) {
+      const writeResult = safeWriteOutputFile(effectiveOutputFile, response, baseDirReal, '[codex-core]');
       if (!writeResult.success) {
-        return {
-          content: [{
-            type: 'text' as const,
-            text: `${paramLines}\n\n---\n\n${writeResult.errorMessage}\n\nresolved_working_directory: ${baseDirReal}\npath_policy: ${pathPolicy}`
-          }],
-          isError: true
-        };
+        return singleErrorBlock(`${paramLines}\n\n---\n\n${writeResult.errorMessage}\n\nresolved_working_directory: ${baseDirReal}\npath_policy: ${pathPolicy}`);
       }
+    }
+
+    const responseLines = [paramLines];
+    const fallbackLine = usedFallback ? `Fallback: used model ${actualModel}` : undefined;
+    if (fallbackLine) {
+      responseLines.push(fallbackLine);
+    }
+
+    // In inline mode, return metadata + raw response as separate content blocks
+    if (isInlineMode) {
+      responseLines.push(`**Request ID:** ${inlineRequestId}`);
+      const metadataText = responseLines.join('\n');
+      const wrappedResponse = wrapUntrustedCliResponse(response, { source: 'inline-cli-response', tool: 'ask_codex' });
+      return inlineSuccessBlocks(metadataText, wrappedResponse);
     }
 
     return {
       content: [{
         type: 'text' as const,
-        text: paramLines
+        text: responseLines.join('\n')
       }]
     };
   } catch (err) {
-    return {
-      content: [{
-        type: 'text' as const,
-        text: `${paramLines}\n\n---\n\nCodex CLI error: ${(err as Error).message}`
-      }],
-      isError: true
-    };
+    return singleErrorBlock(`${paramLines}\n\n---\n\nCodex CLI error: ${(err as Error).message}`);
   }
 }

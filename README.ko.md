@@ -1,4 +1,4 @@
-[English](README.md) | 한국어 | [中文](README.zh.md) | [日本語](README.ja.md) | [Español](README.es.md)
+[English](README.md) | 한국어 | [中文](README.zh.md) | [日本語](README.ja.md) | [Español](README.es.md) | [Tiếng Việt](README.vi.md) | [Português](README.pt.md)
 
 # oh-my-claudecode
 
@@ -136,6 +136,57 @@ omc wait --stop   # 데몬 비활성화
 ```
 
 **요구사항:** tmux (세션 감지용)
+
+### 알림 태그 설정 (Telegram/Discord)
+
+stop 콜백이 세션 요약을 보낼 때 태그할 대상을 설정할 수 있습니다.
+
+```bash
+# 태그 목록 설정/교체
+omc config-stop-callback telegram --enable --token <bot_token> --chat <chat_id> --tag-list "@alice,bob"
+omc config-stop-callback discord --enable --webhook <url> --tag-list "@here,123456789012345678,role:987654321098765432"
+
+# 점진적 수정
+omc config-stop-callback telegram --add-tag charlie
+omc config-stop-callback discord --remove-tag @here
+omc config-stop-callback discord --clear-tags
+```
+
+태그 동작:
+- Telegram: `alice`는 `@alice`로 정규화됩니다
+- Discord: `@here`, `@everyone`, 숫자 사용자 ID, `role:<id>` 지원
+- `file` 콜백은 태그 옵션을 무시합니다
+
+---
+
+## 알림 (Notifications)
+
+세션 라이프사이클 이벤트에 대해 실시간 알림을 받을 수 있습니다.
+
+지원 이벤트:
+- `session-start`
+- `session-stop` (persistent 모드가 대기/블록 상태로 들어갈 때)
+- `session-end`
+- `ask-user-question`
+
+### 설정
+쉘 프로필(예: `~/.zshrc`, `~/.bashrc`)에 환경 변수를 추가하세요:
+
+```bash
+# Discord Bot
+export OMC_DISCORD_NOTIFIER_BOT_TOKEN="your_bot_token"
+export OMC_DISCORD_NOTIFIER_CHANNEL="your_channel_id"
+
+# Telegram
+export OMC_TELEGRAM_BOT_TOKEN="your_bot_token"
+export OMC_TELEGRAM_CHAT_ID="your_chat_id"
+
+# Optional webhooks
+export OMC_DISCORD_WEBHOOK_URL="your_webhook_url"
+export OMC_SLACK_WEBHOOK_URL="your_webhook_url"
+```
+
+> 참고: `claude`를 실행하는 동일한 쉘에서 환경 변수가 로드되어 있어야 합니다.
 
 ---
 

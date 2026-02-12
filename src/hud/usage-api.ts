@@ -13,7 +13,7 @@
  */
 
 import { existsSync, readFileSync, writeFileSync, renameSync, unlinkSync, mkdirSync } from 'fs';
-import { homedir } from 'os';
+import { getClaudeConfigDir } from '../utils/paths.js';
 import { join, dirname } from 'path';
 import { execSync } from 'child_process';
 import https from 'https';
@@ -58,7 +58,7 @@ interface UsageApiResponse {
  * Get the cache file path
  */
 function getCachePath(): string {
-  return join(homedir(), '.claude/plugins/oh-my-claudecode/.usage-cache.json');
+  return join(getClaudeConfigDir(), 'plugins/oh-my-claudecode/.usage-cache.json');
 }
 
 /**
@@ -79,6 +79,12 @@ function readCache(): UsageCache | null {
       }
       if (cache.data.weeklyResetsAt) {
         cache.data.weeklyResetsAt = new Date(cache.data.weeklyResetsAt as unknown as string);
+      }
+      if (cache.data.sonnetWeeklyResetsAt) {
+        cache.data.sonnetWeeklyResetsAt = new Date(cache.data.sonnetWeeklyResetsAt as unknown as string);
+      }
+      if (cache.data.opusWeeklyResetsAt) {
+        cache.data.opusWeeklyResetsAt = new Date(cache.data.opusWeeklyResetsAt as unknown as string);
       }
     }
 
@@ -159,7 +165,7 @@ function readKeychainCredentials(): OAuthCredentials | null {
  */
 function readFileCredentials(): OAuthCredentials | null {
   try {
-    const credPath = join(homedir(), '.claude/.credentials.json');
+    const credPath = join(getClaudeConfigDir(), '.credentials.json');
     if (!existsSync(credPath)) return null;
 
     const content = readFileSync(credPath, 'utf-8');
@@ -323,7 +329,7 @@ function fetchUsageFromApi(accessToken: string): Promise<UsageApiResponse | null
  */
 function writeBackCredentials(creds: OAuthCredentials): void {
   try {
-    const credPath = join(homedir(), '.claude/.credentials.json');
+    const credPath = join(getClaudeConfigDir(), '.credentials.json');
     if (!existsSync(credPath)) return;
 
     const content = readFileSync(credPath, 'utf-8');
@@ -417,8 +423,14 @@ function parseUsageResponse(response: UsageApiResponse): RateLimits | null {
     result.sonnetWeeklyPercent = clamp(sonnetSevenDay);
     result.sonnetWeeklyResetsAt = parseDate(sonnetResetsAt);
   }
-  // If API doesn't return per-model data, sonnetWeeklyPercent remains undefined
-  // This is more accurate than estimating with arbitrary percentages
+
+  // Add Opus-specific quota if available from API
+  const opusSevenDay = response.seven_day_opus?.utilization;
+  const opusResetsAt = response.seven_day_opus?.resets_at;
+  if (opusSevenDay != null) {
+    result.opusWeeklyPercent = clamp(opusSevenDay);
+    result.opusWeeklyResetsAt = parseDate(opusResetsAt);
+  }
 
   return result;
 }

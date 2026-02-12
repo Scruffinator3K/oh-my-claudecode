@@ -56,6 +56,37 @@ function writeJsonFile(path, data) {
 }
 
 /**
+ * Send stop notification (fire-and-forget, non-blocking).
+ * Only notifies on first stop to avoid spam.
+ */
+async function sendStopNotification(modeName, stateData, sessionId, directory) {
+  // Only notify once per mode activation
+  if (stateData._stopNotified) return;
+
+  try {
+    const pluginRoot = process.env.CLAUDE_PLUGIN_ROOT;
+    if (!pluginRoot) return;
+
+    const { pathToFileURL } = require('url');
+    const { notify } = await import(pathToFileURL(join(pluginRoot, 'dist', 'notifications', 'index.js')).href);
+
+    await notify('session-stop', {
+      sessionId: sessionId,
+      projectPath: directory,
+      activeMode: modeName,
+      iteration: stateData.iteration || stateData.reinforcement_count || 1,
+      maxIterations: stateData.max_iterations || stateData.max_reinforcements || 100,
+      incompleteTasks: undefined, // Caller can override
+    }).catch(() => {});
+
+    // Mark as notified to prevent duplicate notifications
+    stateData._stopNotified = true;
+  } catch {
+    // Notification module not available, skip silently
+  }
+}
+
+/**
  * Staleness threshold for mode states (2 hours in milliseconds).
  * States older than this are treated as inactive to prevent stale state
  * from causing the stop hook to malfunction in new sessions.
@@ -166,7 +197,8 @@ function countIncompleteTasks(sessionId) {
   if (!sessionId || typeof sessionId !== "string") return 0;
   if (!/^[a-zA-Z0-9][a-zA-Z0-9_-]{0,255}$/.test(sessionId)) return 0;
 
-  const taskDir = join(homedir(), ".claude", "tasks", sessionId);
+  const cfgDir = process.env.CLAUDE_CONFIG_DIR || join(homedir(), ".claude");
+  const taskDir = join(cfgDir, "tasks", sessionId);
   if (!existsSync(taskDir)) return 0;
 
   let count = 0;
@@ -320,13 +352,13 @@ async function main() {
     // Blocking these causes a deadlock where Claude Code cannot compact.
     // See: https://github.com/Yeachan-Heo/oh-my-claudecode/issues/213
     if (isContextLimitStop(data)) {
-      console.log(JSON.stringify({ continue: true }));
+      console.log(JSON.stringify({ continue: true, suppressOutput: true }));
       return;
     }
 
     // Respect user abort (Ctrl+C, cancel)
     if (isUserAbort(data)) {
-      console.log(JSON.stringify({ continue: true }));
+      console.log(JSON.stringify({ continue: true, suppressOutput: true }));
       return;
     }
 
@@ -359,6 +391,9 @@ async function main() {
         ralph.state.last_checked_at = new Date().toISOString();
         writeJsonFile(ralph.path, ralph.state);
 
+        // Fire-and-forget notification
+        sendStopNotification('ralph', ralph.state, sessionId, directory).catch(() => {});
+
         console.log(
           JSON.stringify({
             decision: "block",
@@ -378,6 +413,9 @@ async function main() {
           autopilot.state.reinforcement_count = newCount;
           autopilot.state.last_checked_at = new Date().toISOString();
           writeJsonFile(autopilot.path, autopilot.state);
+
+          // Fire-and-forget notification
+          sendStopNotification('autopilot', autopilot.state, sessionId, directory).catch(() => {});
 
           console.log(
             JSON.stringify({
@@ -403,6 +441,9 @@ async function main() {
           ultrapilot.state.last_checked_at = new Date().toISOString();
           writeJsonFile(ultrapilot.path, ultrapilot.state);
 
+          // Fire-and-forget notification
+          sendStopNotification('ultrapilot', ultrapilot.state, sessionId, directory).catch(() => {});
+
           console.log(
             JSON.stringify({
               decision: "block",
@@ -424,6 +465,9 @@ async function main() {
           swarmSummary.reinforcement_count = newCount;
           swarmSummary.last_checked_at = new Date().toISOString();
           writeJsonFile(join(stateDir, "swarm-summary.json"), swarmSummary);
+
+          // Fire-and-forget notification
+          sendStopNotification('swarm', swarmSummary, sessionId, directory).catch(() => {});
 
           console.log(
             JSON.stringify({
@@ -447,6 +491,9 @@ async function main() {
           pipeline.state.last_checked_at = new Date().toISOString();
           writeJsonFile(pipeline.path, pipeline.state);
 
+          // Fire-and-forget notification
+          sendStopNotification('pipeline', pipeline.state, sessionId, directory).catch(() => {});
+
           console.log(
             JSON.stringify({
               decision: "block",
@@ -466,6 +513,9 @@ async function main() {
         ultraqa.state.cycle = cycle + 1;
         ultraqa.state.last_checked_at = new Date().toISOString();
         writeJsonFile(ultraqa.path, ultraqa.state);
+
+        // Fire-and-forget notification
+        sendStopNotification('ultraqa', ultraqa.state, sessionId, directory).catch(() => {});
 
         console.log(
           JSON.stringify({
@@ -492,13 +542,16 @@ async function main() {
 
       if (newCount > maxReinforcements) {
         // Max reinforcements reached - allow stop
-        console.log(JSON.stringify({ continue: true }));
+        console.log(JSON.stringify({ continue: true, suppressOutput: true }));
         return;
       }
 
       ultrawork.state.reinforcement_count = newCount;
       ultrawork.state.last_checked_at = new Date().toISOString();
       writeJsonFile(ultrawork.path, ultrawork.state);
+
+      // Fire-and-forget notification
+      sendStopNotification('ultrawork', ultrawork.state, sessionId, directory).catch(() => {});
 
       let reason = `[ULTRAWORK #${newCount}/${maxReinforcements}] Mode active.`;
 
@@ -528,13 +581,16 @@ async function main() {
 
       if (newCount > maxReinforcements) {
         // Max reinforcements reached - allow stop
-        console.log(JSON.stringify({ continue: true }));
+        console.log(JSON.stringify({ continue: true, suppressOutput: true }));
         return;
       }
 
       ecomode.state.reinforcement_count = newCount;
       ecomode.state.last_checked_at = new Date().toISOString();
       writeJsonFile(ecomode.path, ecomode.state);
+
+      // Fire-and-forget notification
+      sendStopNotification('ecomode', ecomode.state, sessionId, directory).catch(() => {});
 
       let reason = `[ECOMODE #${newCount}/${maxReinforcements}] Mode active.`;
 
@@ -553,12 +609,32 @@ async function main() {
       return;
     }
 
-    // No blocking needed
-    console.log(JSON.stringify({ continue: true }));
+    // No blocking needed — Claude is truly idle.
+    // Send session-idle notification (fire-and-forget) so external integrations
+    // (Telegram, Discord) know the session went idle without any active mode.
+    if (sessionId) {
+      try {
+        const pluginRoot = process.env.CLAUDE_PLUGIN_ROOT;
+        if (pluginRoot) {
+          const { pathToFileURL } = require('url');
+          import(pathToFileURL(join(pluginRoot, 'dist', 'notifications', 'index.js')).href)
+            .then(({ notify }) =>
+              notify('session-idle', {
+                sessionId,
+                projectPath: directory,
+              }).catch(() => {})
+            )
+            .catch(() => {});
+        }
+      } catch {
+        // Notification module not available, skip silently
+      }
+    }
+    console.log(JSON.stringify({ continue: true, suppressOutput: true }));
   } catch (error) {
     // On any error, allow stop rather than blocking forever
     console.error(`[persistent-mode] Error: ${error.message}`);
-    console.log(JSON.stringify({ continue: true }));
+    console.log(JSON.stringify({ continue: true, suppressOutput: true }));
   }
 }
 

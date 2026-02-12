@@ -1,4 +1,4 @@
-[English](README.md) | [한국어](README.ko.md) | [中文](README.zh.md) | [日本語](README.ja.md) | Español
+[English](README.md) | [한국어](README.ko.md) | [中文](README.zh.md) | [日本語](README.ja.md) | Español | [Tiếng Việt](README.vi.md) | [Português](README.pt.md)
 
 # oh-my-claudecode
 
@@ -136,6 +136,57 @@ omc wait --stop   # Deshabilitar demonio
 ```
 
 **Requiere:** tmux (para detección de sesión)
+
+### Etiquetas de notificación (Telegram/Discord)
+
+Puedes configurar a quién etiquetar cuando los callbacks de stop envían el resumen de sesión.
+
+```bash
+# Definir/reemplazar lista de etiquetas
+omc config-stop-callback telegram --enable --token <bot_token> --chat <chat_id> --tag-list "@alice,bob"
+omc config-stop-callback discord --enable --webhook <url> --tag-list "@here,123456789012345678,role:987654321098765432"
+
+# Actualizaciones incrementales
+omc config-stop-callback telegram --add-tag charlie
+omc config-stop-callback discord --remove-tag @here
+omc config-stop-callback discord --clear-tags
+```
+
+Comportamiento de etiquetas:
+- Telegram: `alice` se normaliza a `@alice`
+- Discord: soporta `@here`, `@everyone`, IDs numéricos de usuario y `role:<id>`
+- El callback `file` ignora las opciones de etiquetas
+
+---
+
+## Notificaciones
+
+Puedes recibir notificaciones en tiempo real para eventos del ciclo de vida de la sesión.
+
+Eventos compatibles:
+- `session-start`
+- `session-stop` (cuando un modo persistent entra en estado de espera/bloqueo)
+- `session-end`
+- `ask-user-question`
+
+### Configuración
+Agrega estas variables de entorno en tu perfil de shell (por ejemplo `~/.zshrc`, `~/.bashrc`):
+
+```bash
+# Discord Bot
+export OMC_DISCORD_NOTIFIER_BOT_TOKEN="your_bot_token"
+export OMC_DISCORD_NOTIFIER_CHANNEL="your_channel_id"
+
+# Telegram
+export OMC_TELEGRAM_BOT_TOKEN="your_bot_token"
+export OMC_TELEGRAM_CHAT_ID="your_chat_id"
+
+# Webhooks opcionales
+export OMC_DISCORD_WEBHOOK_URL="your_webhook_url"
+export OMC_SLACK_WEBHOOK_URL="your_webhook_url"
+```
+
+> Nota: las variables deben estar cargadas en el mismo shell donde ejecutas `claude`.
 
 ---
 

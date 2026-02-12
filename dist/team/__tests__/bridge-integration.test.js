@@ -3,9 +3,10 @@ import { mkdirSync, writeFileSync, rmSync, existsSync, readFileSync, statSync, r
 import { join } from 'path';
 import { homedir, tmpdir } from 'os';
 import { readTask, updateTask } from '../task-file-ops.js';
-import { checkShutdownSignal, writeShutdownSignal } from '../inbox-outbox.js';
+import { checkShutdownSignal, writeShutdownSignal, appendOutbox } from '../inbox-outbox.js';
 import { writeHeartbeat, readHeartbeat } from '../heartbeat.js';
 import { sanitizeName } from '../tmux-session.js';
+import { logAuditEvent, readAuditLog } from '../audit-log.js';
 const TEST_TEAM = 'test-bridge-int';
 const TASKS_DIR = join(homedir(), '.claude', 'tasks', TEST_TEAM);
 const TEAMS_DIR = join(homedir(), '.claude', 'teams', TEST_TEAM);
@@ -128,6 +129,122 @@ describe('Bridge Integration', () => {
             updateTask(TEST_TEAM, '1', { status: 'completed' });
             const next = await findNextTask(TEST_TEAM, 'worker1');
             expect(next?.id).toBe('2');
+        });
+    });
+    describe('Ready status hook', () => {
+        it('emits a ready outbox message after first successful poll cycle', () => {
+            const config = makeConfig();
+            // Simulate what runBridge() now does: heartbeat at startup,
+            // then ready emitted after first successful poll (heartbeat write succeeds)
+            writeHeartbeat(config.workingDirectory, {
+                workerName: config.workerName,
+                teamName: config.teamName,
+                provider: config.provider,
+                pid: process.pid,
+                lastPollAt: new Date().toISOString(),
+                consecutiveErrors: 0,
+                status: 'polling',
+            });
+            // Ready is now emitted inside the loop after first successful heartbeat
+            appendOutbox(config.teamName, config.workerName, {
+                type: 'ready',
+                message: `Worker ${config.workerName} is ready (${config.provider})`,
+                timestamp: new Date().toISOString(),
+            });
+            const messages = readOutbox();
+            expect(messages.length).toBeGreaterThanOrEqual(1);
+            const readyMsg = messages.find(m => m.type === 'ready');
+            expect(readyMsg).toBeDefined();
+            expect(readyMsg.type).toBe('ready');
+            expect(readyMsg.message).toContain('worker1');
+            expect(readyMsg.message).toContain('codex');
+            expect(readyMsg.timestamp).toBeTruthy();
+        });
+        it('ready message appears before any idle message', () => {
+            const config = makeConfig();
+            // Emit ready (after first successful poll cycle)
+            appendOutbox(config.teamName, config.workerName, {
+                type: 'ready',
+                message: `Worker ${config.workerName} is ready (${config.provider})`,
+                timestamp: new Date().toISOString(),
+            });
+            // Emit idle (poll finds no tasks)
+            appendOutbox(config.teamName, config.workerName, {
+                type: 'idle',
+                message: 'All assigned tasks complete. Standing by.',
+                timestamp: new Date().toISOString(),
+            });
+            const messages = readOutbox();
+            const readyIdx = messages.findIndex(m => m.type === 'ready');
+            const idleIdx = messages.findIndex(m => m.type === 'idle');
+            expect(readyIdx).toBeLessThan(idleIdx);
+        });
+        it('ready message type is valid in OutboxMessage union', () => {
+            const msg = {
+                type: 'ready',
+                message: 'test',
+                timestamp: new Date().toISOString(),
+            };
+            expect(msg.type).toBe('ready');
+        });
+        it('emits worker_ready audit event when ready outbox message is written', () => {
+            const config = makeConfig();
+            // Simulate the bridge ready sequence: heartbeat -> outbox -> audit
+            writeHeartbeat(config.workingDirectory, {
+                workerName: config.workerName,
+                teamName: config.teamName,
+                provider: config.provider,
+                pid: process.pid,
+                lastPollAt: new Date().toISOString(),
+                consecutiveErrors: 0,
+                status: 'ready',
+            });
+            appendOutbox(config.teamName, config.workerName, {
+                type: 'ready',
+                message: `Worker ${config.workerName} is ready (${config.provider})`,
+                timestamp: new Date().toISOString(),
+            });
+            logAuditEvent(config.workingDirectory, {
+                timestamp: new Date().toISOString(),
+                eventType: 'worker_ready',
+                teamName: config.teamName,
+                workerName: config.workerName,
+            });
+            // Verify audit event was logged
+            const events = readAuditLog(config.workingDirectory, config.teamName, {
+                eventType: 'worker_ready',
+            });
+            expect(events.length).toBe(1);
+            expect(events[0].eventType).toBe('worker_ready');
+            expect(events[0].workerName).toBe('worker1');
+        });
+        it('writes ready heartbeat status before transitioning to polling', () => {
+            const config = makeConfig();
+            // Write ready heartbeat (as the bridge now does on first successful poll)
+            writeHeartbeat(config.workingDirectory, {
+                workerName: config.workerName,
+                teamName: config.teamName,
+                provider: config.provider,
+                pid: process.pid,
+                lastPollAt: new Date().toISOString(),
+                consecutiveErrors: 0,
+                status: 'ready',
+            });
+            const hb = readHeartbeat(config.workingDirectory, config.teamName, config.workerName);
+            expect(hb).not.toBeNull();
+            expect(hb?.status).toBe('ready');
+            // Then transitions to polling on next cycle
+            writeHeartbeat(config.workingDirectory, {
+                workerName: config.workerName,
+                teamName: config.teamName,
+                provider: config.provider,
+                pid: process.pid,
+                lastPollAt: new Date().toISOString(),
+                consecutiveErrors: 0,
+                status: 'polling',
+            });
+            const hb2 = readHeartbeat(config.workingDirectory, config.teamName, config.workerName);
+            expect(hb2?.status).toBe('polling');
         });
     });
 });

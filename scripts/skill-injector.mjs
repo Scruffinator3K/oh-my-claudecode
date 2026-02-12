@@ -26,7 +26,8 @@ try {
 }
 
 // Constants (used by fallback)
-const USER_SKILLS_DIR = join(homedir(), '.claude', 'skills', 'omc-learned');
+const cfgDir = process.env.CLAUDE_CONFIG_DIR || join(homedir(), '.claude');
+const USER_SKILLS_DIR = join(cfgDir, 'skills', 'omc-learned');
 const GLOBAL_SKILLS_DIR = join(homedir(), '.omc', 'skills');
 const PROJECT_SKILLS_SUBDIR = join('.omc', 'skills');
 const SKILL_EXTENSION = '.md';
@@ -242,7 +243,7 @@ async function main() {
   try {
     const input = await readStdin();
     if (!input.trim()) {
-      console.log(JSON.stringify({ continue: true }));
+      console.log(JSON.stringify({ continue: true, suppressOutput: true }));
       return;
     }
 
@@ -255,7 +256,7 @@ async function main() {
 
     // Skip if no prompt
     if (!prompt) {
-      console.log(JSON.stringify({ continue: true }));
+      console.log(JSON.stringify({ continue: true, suppressOutput: true }));
       return;
     }
 
@@ -280,11 +281,11 @@ async function main() {
         }
       }));
     } else {
-      console.log(JSON.stringify({ continue: true }));
+      console.log(JSON.stringify({ continue: true, suppressOutput: true }));
     }
   } catch (error) {
     // On any error, allow continuation
-    console.log(JSON.stringify({ continue: true }));
+    console.log(JSON.stringify({ continue: true, suppressOutput: true }));
   }
 }
 
