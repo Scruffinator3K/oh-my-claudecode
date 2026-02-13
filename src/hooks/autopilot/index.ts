@@ -32,6 +32,7 @@ export {
   writeAutopilotState,
   clearAutopilotState,
   isAutopilotActive,
+  getAutopilotStateAge,
   initAutopilot,
   transitionPhase,
   incrementAgentCount,
@@ -85,6 +86,7 @@ export {
   canResumeAutopilot,
   resumeAutopilot,
   formatCancelMessage,
+  STALE_STATE_MAX_AGE_MS,
   type CancelResult
 } from './cancel.js';
 

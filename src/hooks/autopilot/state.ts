@@ -7,7 +7,7 @@
  * - State machine operations
  */
 
-import { existsSync, readFileSync, writeFileSync, mkdirSync, unlinkSync } from 'fs';
+import { existsSync, readFileSync, writeFileSync, mkdirSync, unlinkSync, statSync } from 'fs';
 import { join } from 'path';
 import type { AutopilotState, AutopilotPhase, AutopilotConfig } from './types.js';
 import { DEFAULT_CONFIG } from './types.js';
@@ -130,6 +130,21 @@ export function clearAutopilotState(directory: string, sessionId?: string): bool
     return true;
   } catch {
     return false;
+  }
+}
+
+/**
+ * Get the age of the autopilot state file in milliseconds.
+ * Returns null if no state file exists.
+ */
+export function getAutopilotStateAge(directory: string, sessionId?: string): number | null {
+  const stateFile = getStateFilePath(directory, sessionId);
+  if (!existsSync(stateFile)) return null;
+  try {
+    const stats = statSync(stateFile);
+    return Date.now() - stats.mtimeMs;
+  } catch {
+    return null;
   }
 }
 

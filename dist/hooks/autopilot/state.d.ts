@@ -24,6 +24,11 @@ export declare function writeAutopilotState(directory: string, state: AutopilotS
  */
 export declare function clearAutopilotState(directory: string, sessionId?: string): boolean;
 /**
+ * Get the age of the autopilot state file in milliseconds.
+ * Returns null if no state file exists.
+ */
+export declare function getAutopilotStateAge(directory: string, sessionId?: string): number | null;
+/**
  * Check if autopilot is active
  */
 export declare function isAutopilotActive(directory: string, sessionId?: string): boolean;

@@ -6,7 +6,7 @@
  * - Phase transitions, especially Ralph → UltraQA and UltraQA → Validation
  * - State machine operations
  */
-import { existsSync, readFileSync, writeFileSync, mkdirSync, unlinkSync } from 'fs';
+import { existsSync, readFileSync, writeFileSync, mkdirSync, unlinkSync, statSync } from 'fs';
 import { join } from 'path';
 import { DEFAULT_CONFIG } from './types.js';
 import { readRalphState, clearRalphState, clearLinkedUltraworkState } from '../ralph/index.js';
@@ -114,6 +114,22 @@ export function clearAutopilotState(directory, sessionId) {
     }
     catch {
         return false;
+    }
+}
+/**
+ * Get the age of the autopilot state file in milliseconds.
+ * Returns null if no state file exists.
+ */
+export function getAutopilotStateAge(directory, sessionId) {
+    const stateFile = getStateFilePath(directory, sessionId);
+    if (!existsSync(stateFile))
+        return null;
+    try {
+        const stats = statSync(stateFile);
+        return Date.now() - stats.mtimeMs;
+    }
+    catch {
+        return null;
     }
 }
 /**

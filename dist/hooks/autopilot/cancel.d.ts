@@ -19,8 +19,16 @@ export declare function cancelAutopilot(directory: string, sessionId?: string): 
  * Fully clear autopilot state (no preserve)
  */
 export declare function clearAutopilot(directory: string, sessionId?: string): CancelResult;
+/** Maximum age (ms) for state to be considered resumable (1 hour) */
+export declare const STALE_STATE_MAX_AGE_MS: number;
 /**
- * Check if autopilot can be resumed
+ * Check if autopilot can be resumed.
+ *
+ * Guards against stale state reuse (issue #609):
+ * - Rejects terminal phases (complete/failed)
+ * - Rejects states still marked active (session may still be running)
+ * - Rejects stale states older than STALE_STATE_MAX_AGE_MS
+ * - Auto-cleans stale state files to prevent future false positives
  */
 export declare function canResumeAutopilot(directory: string, sessionId?: string): {
     canResume: boolean;

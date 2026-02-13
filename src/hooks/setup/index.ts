@@ -207,15 +207,27 @@ export function pruneOldStateFiles(directory: string, maxAgeDays: number = DEFAU
 
         // Check file age
         if (stats.mtimeMs < cutoffTime) {
-          // Skip certain critical state files
-          if (
-            file === 'autopilot-state.json' ||
-            file === 'ultrapilot-state.json' ||
-            file === 'ralph-state.json' ||
-            file === 'ultrawork-state.json' ||
-            file === 'swarm-state.json'
-          ) {
-            continue;
+          // For mode state files, only skip if the mode is still active.
+          // Inactive (cancelled/completed) mode states should be pruned
+          // to prevent stale state reuse across sessions (issue #609).
+          const modeStateFiles = [
+            'autopilot-state.json',
+            'ultrapilot-state.json',
+            'ralph-state.json',
+            'ultrawork-state.json',
+            'swarm-state.json'
+          ];
+          if (modeStateFiles.includes(file)) {
+            try {
+              const content = readFileSync(filePath, 'utf-8');
+              const state = JSON.parse(content);
+              if (state.active === true) {
+                continue; // Skip active mode states
+              }
+              // Inactive + old → safe to prune
+            } catch {
+              // If we can't parse the file, it's safe to prune
+            }
           }
 
           unlinkSync(filePath);

@@ -4,7 +4,7 @@
  * Handles cancellation of autopilot, cleaning up all related state
  * including any active Ralph or UltraQA modes.
  */
-import { readAutopilotState, clearAutopilotState, writeAutopilotState } from './state.js';
+import { readAutopilotState, clearAutopilotState, writeAutopilotState, getAutopilotStateAge } from './state.js';
 import { clearRalphState, clearLinkedUltraworkState, readRalphState } from '../ralph/index.js';
 import { clearUltraQAState, readUltraQAState } from '../ultraqa/index.js';
 /**
@@ -123,18 +123,41 @@ export function clearAutopilot(directory, sessionId) {
         message: 'Autopilot state cleared completely'
     };
 }
+/** Maximum age (ms) for state to be considered resumable (1 hour) */
+export const STALE_STATE_MAX_AGE_MS = 60 * 60 * 1000;
 /**
- * Check if autopilot can be resumed
+ * Check if autopilot can be resumed.
+ *
+ * Guards against stale state reuse (issue #609):
+ * - Rejects terminal phases (complete/failed)
+ * - Rejects states still marked active (session may still be running)
+ * - Rejects stale states older than STALE_STATE_MAX_AGE_MS
+ * - Auto-cleans stale state files to prevent future false positives
  */
 export function canResumeAutopilot(directory, sessionId) {
     const state = readAutopilotState(directory, sessionId);
     if (!state) {
         return { canResume: false };
     }
-    // Can resume if state exists and is not complete/failed
-    const canResume = state.phase !== 'complete' && state.phase !== 'failed';
+    // Cannot resume terminal states
+    if (state.phase === 'complete' || state.phase === 'failed') {
+        return { canResume: false, state, resumePhase: state.phase };
+    }
+    // Cannot resume a state that claims to be actively running — it may belong
+    // to another session that is still alive.
+    if (state.active) {
+        return { canResume: false, state, resumePhase: state.phase };
+    }
+    // Reject stale states: if the state file hasn't been touched in over an hour
+    // it is from a previous session and should not be resumed.
+    const ageMs = getAutopilotStateAge(directory, sessionId);
+    if (ageMs !== null && ageMs > STALE_STATE_MAX_AGE_MS) {
+        // Auto-cleanup stale state to prevent future false positives
+        clearAutopilotState(directory, sessionId);
+        return { canResume: false, state, resumePhase: state.phase };
+    }
     return {
-        canResume,
+        canResume: true,
         state,
         resumePhase: state.phase
     };
