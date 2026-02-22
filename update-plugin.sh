@@ -18,12 +18,12 @@ set -euo pipefail
 # ---------------------------------------------------------------------------
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SRC_DIR="$SCRIPT_DIR"
-PLUGIN_VERSION="4.1.7"
+PLUGIN_VERSION="4.3.3"
 CACHE_DIR="$HOME/.claude/plugins/cache/omc/oh-my-claudecode/$PLUGIN_VERSION"
-PATCHED_BRANCH="security-hardened"
-UPSTREAM_REMOTE="origin"
+PATCHED_BRANCH="main"
+UPSTREAM_REMOTE="upstream"
 UPSTREAM_BRANCH="main"
-FORK_REMOTE="fork"
+FORK_REMOTE="origin"
 
 # Runtime directories to copy (no src/, tests, or dev files)
 RUNTIME_DIRS=(dist bridge scripts skills agents commands hooks .claude-plugin docs templates node_modules)
